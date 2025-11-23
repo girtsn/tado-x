@@ -1,6 +1,6 @@
 {
   "domain": "tado",
-  "version": 2025.11,
+  "version": "2025.11.1",
   "name": "Tado",
   "codeowners": ["@erwindouna"],
   "config_flow": true,
@@ -15,5 +15,5 @@
   },
   "iot_class": "cloud_polling",
   "loggers": ["PyTado"],
-  "requirements": ["python-tado==0.18.11"]
+  "requirements": ["python-tado==0.18.15"]
 }
