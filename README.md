@@ -1,4 +1,5 @@
 The integration is an fork update of previous Tado-X HACs integration custom repository
+based on the below instructions, to be able to directly add it to HACs as a custom repository
 
 https://github.com/oliviertassinari/tado-x
 with this update
