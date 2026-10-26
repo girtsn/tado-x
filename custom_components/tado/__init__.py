@@ -36,6 +36,7 @@ PLATFORMS = [
     Platform.CLIMATE,
     Platform.DEVICE_TRACKER,
     Platform.SENSOR,
+    Platform.SELECT,
     Platform.SWITCH,
     Platform.WATER_HEATER,
 ]
