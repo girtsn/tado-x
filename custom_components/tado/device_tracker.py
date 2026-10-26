@@ -8,7 +8,6 @@ from homeassistant.components.device_tracker import (
     DOMAIN as DEVICE_TRACKER_DOMAIN,
     TrackerEntity,
 )
-from homeassistant.const import STATE_HOME, STATE_NOT_HOME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -136,6 +135,6 @@ class TadoDeviceTrackerEntity(CoordinatorEntity[DataUpdateCoordinator], TrackerE
         return self._device_name
 
     @property
-    def location_name(self) -> str:
-        """Return the state of the device."""
-        return STATE_HOME if self._active else STATE_NOT_HOME
+    def in_zones(self) -> list[str]:
+        """Return the zones containing this device."""
+        return ["zone.home"] if self._active else []

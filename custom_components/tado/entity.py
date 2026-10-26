@@ -36,7 +36,6 @@ class TadoDeviceEntity(TadoCoordinatorEntity):
                 manufacturer=DEFAULT_NAME,
                 sw_version=device_info["firmwareVersion"],
                 model=device_info["type"],
-                via_device=(DOMAIN, device_info["serialNumber"]),
             )
         else:
             self.device_name = device_info["serialNo"]
@@ -48,10 +47,6 @@ class TadoDeviceEntity(TadoCoordinatorEntity):
                 manufacturer=DEFAULT_NAME,
                 sw_version=device_info["currentFwVersion"],
                 model=device_info["deviceType"],
-                via_device=(
-                    DOMAIN,
-                    device_info["serialNo"],
-                ),
             )
 
 
