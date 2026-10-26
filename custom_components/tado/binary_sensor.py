@@ -13,6 +13,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
@@ -163,9 +164,16 @@ async def async_setup_entry(
     entities: list[BinarySensorEntity] = []
     tado_line = TADO_LINE_X if tado.is_x else TADO_PRE_LINE_X
 
-    # Create device sensors
+    # Restore previously registered battery sensors even if the API omits
+    # batteryState during this startup. Preserve their existing unique IDs.
+    registry = er.async_get(hass)
     for device in devices:
-        if "batteryState" in device:
+        device_id = device["serialNumber"] if device["is_x"] else device["shortSerialNo"]
+        battery_unique_id = f"{BATTERY_STATE_ENTITY_DESCRIPTION.key} {device_id} {tado.home_id}"
+        known_battery = registry.async_get_entity_id(
+            "binary_sensor", "tado", battery_unique_id
+        ) is not None
+        if "batteryState" in device or known_battery:
             device_type = TYPE_BATTERY
         else:
             device_type = TYPE_POWER
@@ -223,9 +231,18 @@ class TadoDeviceBinarySensor(TadoDeviceEntity, BinarySensorEntity):
         try:
             self._device_info = self.coordinator.data["device"][self.device_id]
         except KeyError:
+            if self.entity_description.key == BATTERY_STATE_ENTITY_DESCRIPTION.key:
+                self._attr_available = False
+                super()._handle_coordinator_update()
             return
 
-        self._attr_is_on = self.entity_description.state_fn(self._device_info)
+        if self.entity_description.key == BATTERY_STATE_ENTITY_DESCRIPTION.key:
+            # Missing/unknown battery status must not be interpreted as OK.
+            battery_state = self._device_info.get("batteryState")
+            self._attr_available = battery_state in ("LOW", "NORMAL")
+            self._attr_is_on = battery_state == "LOW" if self._attr_available else None
+        else:
+            self._attr_is_on = self.entity_description.state_fn(self._device_info)
         if self.entity_description.attributes_fn is not None:
             self._attr_extra_state_attributes = self.entity_description.attributes_fn(
                 self._device_info
