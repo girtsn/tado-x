@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
@@ -60,6 +61,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         )
         self._tado = tado
         self._refresh_token = config_entry.data[CONF_REFRESH_TOKEN]
+        self._api_lock = asyncio.Lock()
         self._fallback = config_entry.options.get(
             CONF_FALLBACK, CONST_OVERLAY_TADO_DEFAULT
         )
@@ -83,11 +85,11 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         return self._fallback
 
     async def _async_save_refresh_token(self) -> None:
-        """Persist a rotated refresh token without logging its value."""
+        """Persist the current rotated token while holding the API lock."""
         refresh_token = await self.hass.async_add_executor_job(
             self._tado.get_refresh_token
         )
-        if refresh_token and refresh_token != self._refresh_token:
+        if refresh_token and refresh_token != self.config_entry.data.get(CONF_REFRESH_TOKEN):
             self._refresh_token = refresh_token
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
@@ -95,57 +97,65 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             )
             _LOGGER.debug("Saved rotated Tado refresh token")
 
+    async def _async_tado_call(self, method, *args):
+        """Serialize shared PyTado calls and persist rotated tokens per request."""
+        async with self._api_lock:
+            try:
+                return await self.hass.async_add_executor_job(method, *args)
+            finally:
+                # A call may rotate the token even if a later step fails.
+                # Do not obscure the original exception if token inspection fails.
+                try:
+                    await self._async_save_refresh_token()
+                except Exception:
+                    _LOGGER.exception("Unable to persist refreshed Tado authentication")
+
     async def _async_update_data(self) -> dict[str, dict]:
         """Fetch the (initial) latest data from Tado."""
 
         try:
-            try:
-                _LOGGER.debug("Preloading home data")
-                tado_home_call = await self.hass.async_add_executor_job(self._tado.get_me)
-                _LOGGER.debug("Preloading zones and devices")
-                self.zones = await self.hass.async_add_executor_job(self._tado.get_zones)
-                self.devices = await self.hass.async_add_executor_job(
-                    self._tado.get_devices
-                )
-                self.devices = self._normalize_devices(self.devices)
-            except RequestException as err:
-                raise UpdateFailed(f"Error during Tado setup: {err}") from err
+            _LOGGER.debug("Preloading home data")
+            tado_home_call = await self._async_tado_call(self._tado.get_me)
+            _LOGGER.debug("Preloading zones and devices")
+            self.zones = await self._async_tado_call(self._tado.get_zones)
+            self.devices = await self._async_tado_call(
+                self._tado.get_devices
+            )
+            self.devices = self._normalize_devices(self.devices)
+        except RequestException as err:
+            raise UpdateFailed(f"Error during Tado setup: {err}") from err
 
-            tado_home = tado_home_call["homes"][0]
-            self.home_id = tado_home["id"]
-            self.home_name = tado_home["name"]
-            self.is_x = self._tado._http.is_x_line  # very bad™️
-            [
-                device.update(is_x=self.is_x)
-                for device in self.devices
-                if isinstance(device, dict)
-            ]
-            if self.is_x:
-                for z in self.zones:
-                    z["type"] = TYPE_HEATING
-                    z["name"] = z["roomName"]
-                    z["id"] = z["roomId"]
+        tado_home = tado_home_call["homes"][0]
+        self.home_id = tado_home["id"]
+        self.home_name = tado_home["name"]
+        self.is_x = self._tado._http.is_x_line  # very bad™️
+        [
+            device.update(is_x=self.is_x)
+            for device in self.devices
+            if isinstance(device, dict)
+        ]
+        if self.is_x:
+            for z in self.zones:
+                z["type"] = TYPE_HEATING
+                z["name"] = z["roomName"]
+                z["id"] = z["roomId"]
 
-            devices = await self._async_update_devices()
-            zones = await self._async_update_zones()
-            home = await self._async_update_home()
+        devices = await self._async_update_devices()
+        zones = await self._async_update_zones()
+        home = await self._async_update_home()
 
-            self.data["device"] = devices
-            self.data["zone"] = zones
-            self.data["weather"] = home["weather"]
-            self.data["geofence"] = home["geofence"]
+        self.data["device"] = devices
+        self.data["zone"] = zones
+        self.data["weather"] = home["weather"]
+        self.data["geofence"] = home["geofence"]
 
-            return self.data
-        finally:
-            # Persist a token rotated by any successful API call even when a
-            # later device, zone or weather update fails.
-            await self._async_save_refresh_token()
+        return self.data
 
     async def _async_update_devices(self) -> dict[str, dict]:
         """Update the device data from Tado."""
 
         try:
-            devices = await self.hass.async_add_executor_job(self._tado.get_devices)
+            devices = await self._async_tado_call(self._tado.get_devices)
         except RequestException as err:
             _LOGGER.error("Error updating Tado devices: %s", err)
             raise UpdateFailed(f"Error updating Tado devices: {err}") from err
@@ -154,7 +164,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             _LOGGER.error("No linked devices found for home ID %s", self.home_id)
             raise UpdateFailed(f"No linked devices found for home ID {self.home_id}")
 
-        return await self.hass.async_add_executor_job(self._update_device_info, devices)
+        return await self._async_tado_call(self._update_device_info, devices)
 
     @staticmethod
     def _normalize_devices(devices: list[Any]) -> list[dict[str, Any]]:
@@ -213,7 +223,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
     async def _async_update_zones(self) -> dict[int, dict]:
         """Update the zone data from Tado."""
         try:
-            zone_states_call = await self.hass.async_add_executor_job(
+            zone_states_call = await self._async_tado_call(
                 self._tado.get_zone_states
             )
             if not self.is_x:
@@ -237,7 +247,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
 
         _LOGGER.debug("Updating zone %s", zone_id)
         try:
-            data = await self.hass.async_add_executor_job(
+            data = await self._async_tado_call(
                 self._tado.get_zone_state, zone_id
             )
         except RequestException as err:
@@ -251,8 +261,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         """Update the home data from Tado."""
 
         try:
-            weather = await self.hass.async_add_executor_job(self._tado.get_weather)
-            geofence = await self.hass.async_add_executor_job(self._tado.get_home_state)
+            weather = await self._async_tado_call(self._tado.get_weather)
+            geofence = await self._async_tado_call(self._tado.get_home_state)
         except RequestException as err:
             _LOGGER.error("Error updating Tado home: %s", err)
             raise UpdateFailed(f"Error updating Tado home: {err}") from err
@@ -272,7 +282,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             return {"type": TYPE_HEATING}
 
         try:
-            return await self.hass.async_add_executor_job(
+            return await self._async_tado_call(
                 self._tado.get_capabilities, zone_id
             )
         except RequestException as err:
@@ -282,7 +292,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         """Fetch the auto geofencing supported from Tado."""
 
         try:
-            return await self.hass.async_add_executor_job(
+            return await self._async_tado_call(
                 self._tado.get_auto_geofencing_supported
             )
         except RequestException as err:
@@ -292,7 +302,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         """Reset the zone back to the default operation."""
 
         try:
-            await self.hass.async_add_executor_job(
+            await self._async_tado_call(
                 self._tado.reset_zone_overlay, zone_id
             )
             await self._update_zone(zone_id)
@@ -306,11 +316,11 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         """Set the presence to home, away or auto."""
 
         if presence == PRESET_AWAY:
-            await self.hass.async_add_executor_job(self._tado.set_away)
+            await self._async_tado_call(self._tado.set_away)
         elif presence == PRESET_HOME:
-            await self.hass.async_add_executor_job(self._tado.set_home)
+            await self._async_tado_call(self._tado.set_home)
         elif presence == PRESET_AUTO:
-            await self.hass.async_add_executor_job(self._tado.set_auto)
+            await self._async_tado_call(self._tado.set_auto)
 
     async def set_zone_overlay(
         self,
@@ -344,7 +354,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         )
 
         try:
-            await self.hass.async_add_executor_job(
+            await self._async_tado_call(
                 self._tado.set_zone_overlay,
                 zone_id,
                 overlay_mode,
@@ -368,7 +378,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
     async def set_zone_off(self, zone_id, overlay_mode, device_type="HEATING"):
         """Set a zone to off."""
         try:
-            await self.hass.async_add_executor_job(
+            await self._async_tado_call(
                 self._tado.set_zone_overlay,
                 zone_id,
                 overlay_mode,
@@ -385,7 +395,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
     async def set_temperature_offset(self, device_id, offset):
         """Set temperature offset of device."""
         try:
-            await self.hass.async_add_executor_job(
+            await self._async_tado_call(
                 self._tado.set_temp_offset, device_id, offset
             )
         except RequestException as err:
@@ -398,7 +408,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             raise HomeAssistantError("Tado client is not initialized")
 
         try:
-            return await self.hass.async_add_executor_job(
+            return await self._async_tado_call(
                 self._tado.set_eiq_meter_readings, dt, reading
             )
         except RequestException as err:
@@ -407,7 +417,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
     async def set_child_lock(self, device_id: str, enabled: bool) -> None:
         """Set child lock of device."""
         try:
-            await self.hass.async_add_executor_job(
+            await self._async_tado_call(
                 self._tado.set_child_lock,
                 device_id,
                 enabled,
@@ -426,6 +436,7 @@ class TadoMobileDeviceUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         hass: HomeAssistant,
         config_entry: TadoConfigEntry,
         tado: Tado,
+        main_coordinator: TadoDataUpdateCoordinator,
     ) -> None:
         """Initialize the Tado data update coordinator."""
         super().__init__(
@@ -436,13 +447,14 @@ class TadoMobileDeviceUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             update_interval=SCAN_MOBILE_DEVICE_INTERVAL,
         )
         self._tado = tado
+        self._main_coordinator = main_coordinator
         self.data: dict[str, dict] = {}
 
     async def _async_update_data(self) -> dict[str, dict]:
         """Fetch the latest data from Tado."""
 
         try:
-            mobile_devices = await self.hass.async_add_executor_job(
+            mobile_devices = await self._main_coordinator._async_tado_call(
                 self._tado.get_mobile_devices
             )
         except RequestException as err:

@@ -100,7 +100,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     coordinator = TadoDataUpdateCoordinator(hass, entry, tado)
     await coordinator.async_config_entry_first_refresh()
 
-    mobile_coordinator = TadoMobileDeviceUpdateCoordinator(hass, entry, tado)
+    mobile_coordinator = TadoMobileDeviceUpdateCoordinator(hass, entry, tado, coordinator)
     await mobile_coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
