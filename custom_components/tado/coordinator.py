@@ -93,10 +93,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             self.devices = await self.hass.async_add_executor_job(
                 self._tado.get_devices
             )
-            self.devices = [
-                (device if isinstance(device, dict) else device[0])
-                for device in self.devices
-            ]
+            self.devices = self._normalize_devices(self.devices)
         except RequestException as err:
             raise UpdateFailed(f"Error during Tado setup: {err}") from err
 
@@ -153,25 +150,35 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
 
         return await self.hass.async_add_executor_job(self._update_device_info, devices)
 
-    def _update_device_info(self, devices: list[dict[str, Any]]) -> dict[str, dict]:
+    @staticmethod
+    def _normalize_devices(devices: list[Any]) -> list[dict[str, Any]]:
+        """Flatten device groups returned by PyTado, retaining every device."""
+        normalized: list[dict[str, Any]] = []
+        for item in devices:
+            if isinstance(item, dict):
+                normalized.append(item)
+            elif isinstance(item, list):
+                for device in item:
+                    if isinstance(device, dict):
+                        normalized.append(device)
+                    else:
+                        _LOGGER.warning("Unexpected Tado device entry: %s", type(device).__name__)
+            else:
+                _LOGGER.warning("Unexpected Tado device entry: %s", type(item).__name__)
+        return normalized
+
+    def _update_device_info(self, devices: list[Any]) -> dict[str, dict]:
         """Update the device data from Tado."""
         mapped_devices: dict[str, dict] = {}
-        for device in devices:
+        for device in self._normalize_devices(devices):
             if self.is_x:
-                device_short_serial_no = (
-                    device["serialNumber"]
-                    if isinstance(device, dict)
-                    else device[0]["serialNumber"]
-                )
+                device_short_serial_no = device["serialNumber"]
             else:
                 device_short_serial_no = device["shortSerialNo"]
             _LOGGER.debug("Updating device %s", device_short_serial_no)
 
             if self.is_x:
-                if isinstance(device, dict):
-                    device[TEMP_OFFSET] = device.get("temperatureOffset", 0)
-                else:
-                    _LOGGER.warning("Unexpected device format: %s", device)
+                device[TEMP_OFFSET] = device.get("temperatureOffset", 0)
             else:
                 try:
                     if (

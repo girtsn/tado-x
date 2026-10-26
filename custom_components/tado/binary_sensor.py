@@ -56,9 +56,7 @@ CONNECTION_STATE_ENTITY_DESCRIPTION = TadoBinarySensorEntityDescription(
 TADO_X_CONNECTION_STATE_ENTITY_DESCRIPTION = TadoBinarySensorEntityDescription(
     key="connection state",
     translation_key="connection_state",
-    state_fn=lambda data: data.get("connection", {}).get("state", False)
-    if isinstance(data, dict)
-    else data[0].get("connection", {}).get("state", False),
+    state_fn=lambda data: data.get("connection", {}).get("state") == "CONNECTED",
     device_class=BinarySensorDeviceClass.CONNECTIVITY,
 )
 POWER_ENTITY_DESCRIPTION = TadoBinarySensorEntityDescription(
