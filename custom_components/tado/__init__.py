@@ -67,10 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     _async_import_options_from_data_if_missing(hass, entry)
 
     _LOGGER.debug("Setting up Tado connection")
-    _LOGGER.debug(
-        "Creating tado instance with refresh token: %s",
-        entry.data[CONF_REFRESH_TOKEN],
-    )
+    _LOGGER.debug("Creating Tado instance using stored authentication")
 
     def create_tado_instance() -> tuple[Tado, str]:
         """Create a Tado instance, this time with a previously obtained refresh token."""
@@ -87,6 +84,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
         raise ConfigEntryAuthFailed(
             f"Device login flow status is {device_status}. Starting re-authentication."
         )
+
+    # Creating Tado can rotate the refresh token. Save it before any
+    # coordinator calls, which might fail and abort setup.
+    refresh_token = await hass.async_add_executor_job(tado.get_refresh_token)
+    if refresh_token and refresh_token != entry.data[CONF_REFRESH_TOKEN]:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_REFRESH_TOKEN: refresh_token}
+        )
+        _LOGGER.debug("Saved rotated Tado refresh token after authentication")
 
     _LOGGER.debug("Tado connection established")
 

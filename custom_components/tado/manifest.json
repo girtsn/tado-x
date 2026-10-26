@@ -1,6 +1,6 @@
 {
   "domain": "tado",
-  "version": "2026.11.3",
+  "version": "2026.11.4",
   "name": "Tado",
   "codeowners": ["@erwindouna"],
   "config_flow": true,

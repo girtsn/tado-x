@@ -82,58 +82,64 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         """Return fallback flag to Smart Schedule."""
         return self._fallback
 
-    async def _async_update_data(self) -> dict[str, dict]:
-        """Fetch the (initial) latest data from Tado."""
-
-        try:
-            _LOGGER.debug("Preloading home data")
-            tado_home_call = await self.hass.async_add_executor_job(self._tado.get_me)
-            _LOGGER.debug("Preloading zones and devices")
-            self.zones = await self.hass.async_add_executor_job(self._tado.get_zones)
-            self.devices = await self.hass.async_add_executor_job(
-                self._tado.get_devices
-            )
-            self.devices = self._normalize_devices(self.devices)
-        except RequestException as err:
-            raise UpdateFailed(f"Error during Tado setup: {err}") from err
-
-        tado_home = tado_home_call["homes"][0]
-        self.home_id = tado_home["id"]
-        self.home_name = tado_home["name"]
-        self.is_x = self._tado._http.is_x_line  # very bad™️
-        [
-            device.update(is_x=self.is_x)
-            for device in self.devices
-            if isinstance(device, dict)
-        ]
-        if self.is_x:
-            for z in self.zones:
-                z["type"] = TYPE_HEATING
-                z["name"] = z["roomName"]
-                z["id"] = z["roomId"]
-
-        devices = await self._async_update_devices()
-        zones = await self._async_update_zones()
-        home = await self._async_update_home()
-
-        self.data["device"] = devices
-        self.data["zone"] = zones
-        self.data["weather"] = home["weather"]
-        self.data["geofence"] = home["geofence"]
-
+    async def _async_save_refresh_token(self) -> None:
+        """Persist a rotated refresh token without logging its value."""
         refresh_token = await self.hass.async_add_executor_job(
             self._tado.get_refresh_token
         )
-
-        if refresh_token != self._refresh_token:
-            _LOGGER.debug("New refresh token obtained from Tado: %s", refresh_token)
+        if refresh_token and refresh_token != self._refresh_token:
             self._refresh_token = refresh_token
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 data={**self.config_entry.data, CONF_REFRESH_TOKEN: refresh_token},
             )
+            _LOGGER.debug("Saved rotated Tado refresh token")
 
-        return self.data
+    async def _async_update_data(self) -> dict[str, dict]:
+        """Fetch the (initial) latest data from Tado."""
+
+        try:
+            try:
+                _LOGGER.debug("Preloading home data")
+                tado_home_call = await self.hass.async_add_executor_job(self._tado.get_me)
+                _LOGGER.debug("Preloading zones and devices")
+                self.zones = await self.hass.async_add_executor_job(self._tado.get_zones)
+                self.devices = await self.hass.async_add_executor_job(
+                    self._tado.get_devices
+                )
+                self.devices = self._normalize_devices(self.devices)
+            except RequestException as err:
+                raise UpdateFailed(f"Error during Tado setup: {err}") from err
+
+            tado_home = tado_home_call["homes"][0]
+            self.home_id = tado_home["id"]
+            self.home_name = tado_home["name"]
+            self.is_x = self._tado._http.is_x_line  # very bad™️
+            [
+                device.update(is_x=self.is_x)
+                for device in self.devices
+                if isinstance(device, dict)
+            ]
+            if self.is_x:
+                for z in self.zones:
+                    z["type"] = TYPE_HEATING
+                    z["name"] = z["roomName"]
+                    z["id"] = z["roomId"]
+
+            devices = await self._async_update_devices()
+            zones = await self._async_update_zones()
+            home = await self._async_update_home()
+
+            self.data["device"] = devices
+            self.data["zone"] = zones
+            self.data["weather"] = home["weather"]
+            self.data["geofence"] = home["geofence"]
+
+            return self.data
+        finally:
+            # Persist a token rotated by any successful API call even when a
+            # later device, zone or weather update fails.
+            await self._async_save_refresh_token()
 
     async def _async_update_devices(self) -> dict[str, dict]:
         """Update the device data from Tado."""
