@@ -9,6 +9,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import selector
 
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
+from .heat_allocation import allocate_recent, allocation_history
 
 from .const import (
     ATTR_MESSAGE,
@@ -194,4 +195,32 @@ def setup_services(hass: HomeAssistant) -> None:
                                                      vol.Range(min=20, max=75)),
             vol.Optional("auto_adaptation"): bool,
         }), supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def x_compute_estimates(call: ServiceCall) -> dict:
+        main = get_x_coordinator(call)
+        async with main.x_allocation_lock:
+            return await allocate_recent(
+                hass, main, days=call.data.get("days", 3),
+                dry_run=call.data.get("dry_run", False),
+            )
+
+    async def x_estimate_history(call: ServiceCall) -> dict:
+        main = get_x_coordinator(call)
+        return await allocation_history(
+            hass, main, period=call.data.get("period", "month")
+        )
+
+    hass.services.async_register(
+        DOMAIN, "x_compute_heating_allocation", x_compute_estimates,
+        schema=vol.Schema({**home,
+            vol.Optional("days", default=3): vol.All(vol.Coerce(int), vol.Range(min=1, max=35)),
+            vol.Optional("dry_run", default=False): bool,
+        }), supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, "x_heating_allocation_history", x_estimate_history,
+        schema=vol.Schema({**home, vol.Optional("period", default="month"):
+                           vol.In(["day", "week", "month", "year", "3years"])}),
+        supports_response=SupportsResponse.ONLY,
     )
