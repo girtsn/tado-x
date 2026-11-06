@@ -4,7 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
-from .x_entities import TadoXDhwSetpointNumber, TadoXFlowMaxNumber
+from .x_entities import TadoXDhwSetpointNumber, TadoXFlowMaxNumber, TadoXRoomCapacityNumber
 
 
 async def async_setup_entry(
@@ -17,4 +17,5 @@ async def async_setup_entry(
     async_add_entities([
         TadoXDhwSetpointNumber(main.x_settings, main),
         TadoXFlowMaxNumber(main.x_settings, main),
+        *[TadoXRoomCapacityNumber(main, zone) for zone in main.zones],
     ])
