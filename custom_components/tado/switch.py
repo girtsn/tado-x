@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
 from .entity import TadoDataUpdateCoordinator, TadoZoneEntity
+from .x_entities import TadoXAutoAdaptationSwitch
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ async def async_setup_entry(
                 tado, zone["name"], zone["id"], zone["devices"][0]
             )
         )
+    if tado.is_x and tado.x_settings is not None:
+        entities.append(TadoXAutoAdaptationSwitch(tado.x_settings, tado))
     async_add_entities(entities, True)
 
 
