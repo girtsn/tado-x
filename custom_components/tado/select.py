@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
 from .entity import TadoHomeEntity
+from .x_entities import TadoXDhwModeSelect
 
 
 async def async_setup_entry(
@@ -16,7 +17,11 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add the household-level presence selector."""
-    async_add_entities([TadoPresenceSelect(entry.runtime_data.coordinator)])
+    main = entry.runtime_data.coordinator
+    entities = [TadoPresenceSelect(main)]
+    if main.is_x and main.x_settings is not None:
+        entities.append(TadoXDhwModeSelect(main.x_settings, main))
+    async_add_entities(entities)
 
 
 class TadoPresenceSelect(TadoHomeEntity, SelectEntity):

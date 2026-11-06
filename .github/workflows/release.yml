@@ -1,0 +1,41 @@
+name: Publish tado X v2026.11.7
+
+on:
+  workflow_run:
+    workflows: ["Validate tado X HOPS controls and heating allocation"]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Publish validated HACS release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c "import json; print(json.load(open('custom_components/tado/manifest.json'))['version'])")
+          if [[ "$VERSION" != "2026.11.7" ]]; then
+            exit 0
+          fi
+          if gh release view v2026.11.7 >/dev/null 2>&1; then
+            echo "Release already exists"
+            exit 0
+          fi
+          gh release create v2026.11.7 \
+            --target "$VALIDATED_SHA" \
+            --title "tado X v2026.11.7 — schedules, DHW, flow and heating allocation" \
+            --notes-file RELEASE_NOTES_2026.11.7.md

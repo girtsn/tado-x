@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import TadoDataUpdateCoordinator
 from .entity import TadoHomeEntity, TadoZoneEntity
+from .x_entities import TadoXAdaptedFlowSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -240,6 +241,8 @@ async def async_setup_entry(
             ]
         )
 
+    if tado.is_x and tado.x_settings is not None:
+        entities.append(TadoXAdaptedFlowSensor(tado.x_settings, tado))
     async_add_entities(entities, True)
 
 

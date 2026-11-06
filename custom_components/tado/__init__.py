@@ -1,12 +1,15 @@
 """Support for the (unofficial) Tado API."""
 
 from datetime import timedelta
+from pathlib import Path
+import asyncio
 import logging
 
 import PyTado
 import PyTado.exceptions
 from PyTado.interface import Tado
 
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, callback
@@ -16,6 +19,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -30,6 +34,8 @@ from .const import (
 from .coordinator import TadoDataUpdateCoordinator, TadoMobileDeviceUpdateCoordinator
 from .models import TadoData
 from .services import setup_services
+from .tadox_ext import TadoXSettingsCoordinator
+from .heat_allocation import allocate_recent
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -39,6 +45,7 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SWITCH,
     Platform.WATER_HEATER,
+    Platform.NUMBER,
 ]
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=4)
@@ -54,6 +61,17 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Tado."""
 
     setup_services(hass)
+    # Serve schedule/consumption cards directly from this integration's HACS
+    # package. Dashboard resource registration remains an explicit UI step.
+    folder = Path(__file__).parent / "www"
+    await hass.http.async_register_static_paths([
+        StaticPathConfig("/tado/x-schedule-card.js",
+                         str(folder / "tado-x-schedule-card.js"),
+                         cache_headers=False),
+        StaticPathConfig("/tado/x-heating-energy-card.js",
+                         str(folder / "tado-x-heating-energy-card.js"),
+                         cache_headers=False),
+    ])
     return True
 
 
@@ -103,8 +121,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     mobile_coordinator = TadoMobileDeviceUpdateCoordinator(hass, entry, tado, coordinator)
     await mobile_coordinator.async_config_entry_first_refresh()
 
+    coordinator.x_settings = None
+    if coordinator.is_x:
+        coordinator.x_settings = TadoXSettingsCoordinator(hass, coordinator)
+        try:
+            await coordinator.x_settings.async_refresh()
+        except Exception:
+            # Optional HOPS settings should never take down working tado heating.
+            _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    if coordinator.is_x:
+        coordinator.x_allocation_lock = asyncio.Lock()
+
+        @callback
+        def run_hourly_allocation(now) -> None:
+            if coordinator.x_allocation_lock.locked():
+                return
+
+            async def run():
+                async with coordinator.x_allocation_lock:
+                    try:
+                        await allocate_recent(hass, coordinator, days=3)
+                    except Exception:
+                        _LOGGER.warning(
+                            "tado X / Vaillant optional heating estimate failed",
+                            exc_info=True,
+                        )
+            hass.async_create_task(run())
+
+        # Recorder produces hourly statistics a few minutes after the hour.
+        # No new tado or Vaillant cloud API requests are issued by this task.
+        entry.async_on_unload(
+            async_track_time_change(hass, run_hourly_allocation, minute=15, second=0)
+        )
 
     return True
 

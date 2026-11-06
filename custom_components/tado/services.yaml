@@ -76,3 +76,189 @@ add_meter_reading:
           mode: box
           min: 0
           step: 1
+
+
+x_list_rooms:
+  name: List tado X rooms
+  description: Return room names and room IDs from the current tado cache. No cloud calls.
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_get_schedule:
+  name: Read a tado X weekly room schedule
+  description: On-demand HOPS GET. Returns seven days and conflict-prevention signatures.
+  fields:
+    room_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 2147483647
+          mode: box
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_save_day:
+  name: Save one tado X room schedule day
+  description: Re-read, compare signed snapshot, POST one day, and verify by readback.
+  fields:
+    room_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 2147483647
+          mode: box
+    day:
+      required: true
+      selector:
+        select:
+          options:
+            - MONDAY
+            - TUESDAY
+            - WEDNESDAY
+            - THURSDAY
+            - FRIDAY
+            - SATURDAY
+            - SUNDAY
+    blocks:
+      required: true
+      description: 'Complete day as list of start/end HH:MM, power ON/OFF and temperature when ON.'
+      selector:
+        object:
+    expected_signature:
+      required: true
+      selector:
+        text:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_get_settings:
+  name: Read tado X DHW and flow settings
+  description: Two on-demand HOPS GET requests; returns raw setting structures.
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_set_dhw_temperature:
+  name: Set tado X hot-water temperature
+  description: Uses HOPS domesticHotWater/manualControl. This is a manual setpoint, not a permanent scheduled programme.
+  fields:
+    temperature:
+      required: true
+      selector:
+        number:
+          min: 35
+          max: 70
+          step: 1
+          unit_of_measurement: "°C"
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_boost_dhw:
+  name: Boost or stop tado X domestic hot water
+  fields:
+    boost:
+      required: true
+      selector:
+        select:
+          options:
+            - "ON"
+            - "OFF"
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_resume_dhw:
+  name: Resume tado X hot-water schedule
+  description: Resume the programmer's native schedule if supported; for this home its weekly endpoint returned 404.
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_set_flow:
+  name: Change tado X maximum flow temperature and automatic optimisation
+  description: Patch only the specified settings. These are configuration values, not measured boiler flow temperatures.
+  fields:
+    max_temperature:
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 75
+          step: 1
+          unit_of_measurement: "°C"
+    auto_adaptation:
+      required: false
+      selector:
+        boolean:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_compute_heating_allocation:
+  name: Compute estimated gas input allocated to tado rooms
+  description: Local Recorder only. Uses myPyllant Gas Heating hourly Wh and tado room mean heating demand. Publishes separate tado external kWh statistics; does NOT alter source statistics.
+  fields:
+    days:
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 35
+          mode: box
+    dry_run:
+      required: false
+      default: false
+      selector:
+        boolean:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_heating_allocation_history:
+  name: Read estimated per-room heating gas history
+  description: Local Recorder only, returning hourly, daily or monthly summaries for dashboards.
+  fields:
+    period:
+      required: false
+      default: month
+      selector:
+        select:
+          options:
+            - day
+            - week
+            - month
+            - year
+            - 3years
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado

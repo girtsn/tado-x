@@ -80,7 +80,7 @@
         "name": "Automatic geofencing"
       },
       "heating": {
-        "name": "Heating"
+        "name": "Heating demand"
       },
       "ac": {
         "name": "AC"
