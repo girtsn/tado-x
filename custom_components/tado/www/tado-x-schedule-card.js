@@ -279,7 +279,7 @@ class TadoXScheduleCard extends HTMLElement {
       const cprow=this._node("div",null,"row");
       cprow.append(this._node("span","Copy "+this._day+" to"));
       cprow.append(this._select(X_DAYS.map(d=>[d,d.slice(0,3)]),this._copyTargetDay,v=>{this._copyTargetDay=v;}));
-      cprow.append(this._button("Copy to draft",()=>this._copyTargetDay()));
+      cprow.append(this._button("Copy to draft",()=>this._copyDay()));
       cp.append(cprow);
       const dst=this._node("div",null,"row");
       dst.append(this._node("span","Copy to room"));
