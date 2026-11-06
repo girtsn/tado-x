@@ -30,6 +30,7 @@ from .const import (
 from .coordinator import TadoDataUpdateCoordinator, TadoMobileDeviceUpdateCoordinator
 from .models import TadoData
 from .services import setup_services
+from .tadox_ext import TadoXSettingsCoordinator
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -39,6 +40,7 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SWITCH,
     Platform.WATER_HEATER,
+    Platform.NUMBER,
 ]
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=4)
@@ -103,6 +105,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     mobile_coordinator = TadoMobileDeviceUpdateCoordinator(hass, entry, tado, coordinator)
     await mobile_coordinator.async_config_entry_first_refresh()
 
+    coordinator.x_settings = None
+    if coordinator.is_x:
+        coordinator.x_settings = TadoXSettingsCoordinator(hass, coordinator)
+        try:
+            await coordinator.x_settings.async_refresh()
+        except Exception:
+            # Optional HOPS settings should never take down working tado heating.
+            _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
