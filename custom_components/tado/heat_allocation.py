@@ -203,7 +203,7 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     return {
         "status": "estimated_hours_published" if not dry_run else "dry_run",
         "hours": processed, "gas_heating_kwh": round(total_kwh,3),
-        "assigned_kwh": round(allocated_kwh,3),
+        "allocated_kwh": round(allocated_kwh,3),
         "unallocated_kwh": round(unknown_kwh,3),
         "source": "myPyllant Gas Heating (Wh) + tado heating demand hourly means",
         "interpretation": "Estimated allocation of gas INPUT, not thermal energy per radiator",
