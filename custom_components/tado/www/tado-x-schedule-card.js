@@ -14,7 +14,7 @@ class TadoXScheduleCard extends HTMLElement {
     this._cfg={};this._hass=null;this._rooms=[];this._room=null;this._day="MONDAY";
     this._data=null;this._baseline=null;this._dirty=new Set();
     this._busy=false;this._notice="";this._initialized=false;
-    this._copyDay="MONDAY";this._copyRoom="";
+    this._copyTargetDay="MONDAY";this._copyRoom="";
   }
   setConfig(config){this._cfg=config||{};this._render();}
   set hass(hass){
@@ -101,7 +101,7 @@ class TadoXScheduleCard extends HTMLElement {
   }
   _copyDay(){
     if(this._busy||!this._state())return;
-    const to=this._copyDay;
+    const to=this._copyTargetDay;
     if(to===this._day)return;
     this._data[to].blocks=clone(this._state().blocks);
     this._mark(to);
@@ -119,8 +119,10 @@ class TadoXScheduleCard extends HTMLElement {
         expected_signature:this._baseline[day].signature,
       });
       if(!result.confirmed)throw Error("Write sent, but readback differed: check the tado app before retrying.");
+      const remaining = X_DAYS.filter(d=>d!==day && this._dirty.has(d)).map(d=>[d,clone(this._data[d].blocks)]);
       await this._load();
-      this._notice="Saved and verified "+day+" in tado.";
+      for(const [d,blocks] of remaining){this._data[d].blocks=blocks;this._mark(d);}
+      this._notice="Saved and verified "+day+" in tado. Other unsaved days retained as drafts.";
     }catch(e){this._notice="Not verified: "+(e?.message||e)+". Reload before retrying.";}
     finally{this._busy=false;this._render();}
   }
@@ -276,8 +278,8 @@ class TadoXScheduleCard extends HTMLElement {
       cp.append(this._node("strong","Copy schedules"));
       const cprow=this._node("div",null,"row");
       cprow.append(this._node("span","Copy "+this._day+" to"));
-      cprow.append(this._select(X_DAYS.map(d=>[d,d.slice(0,3)]),this._copyDay,v=>{this._copyDay=v;}));
-      cprow.append(this._button("Copy to draft",()=>this._copyDay()));
+      cprow.append(this._select(X_DAYS.map(d=>[d,d.slice(0,3)]),this._copyTargetDay,v=>{this._copyTargetDay=v;}));
+      cprow.append(this._button("Copy to draft",()=>this._copyTargetDay()));
       cp.append(cprow);
       const dst=this._node("div",null,"row");
       dst.append(this._node("span","Copy to room"));
