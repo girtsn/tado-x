@@ -115,8 +115,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
   _rows(source){
     const id=this._sensorId(source),rows=id?this._series[id]:null;
     return (Array.isArray(rows)?rows:[])
-      .filter(row=>Number.isFinite(Number(row.start)) &&
-        Number.isFinite(Number(row.mean)))
+      .filter(row=>row.start!=null && row.mean!=null &&
+        Number.isFinite(Number(row.start)) && Number.isFinite(Number(row.mean)))
       .map(row=>({x:Number(row.start),y:Number(row.mean)}))
       .sort((a,b)=>a.x-b.x);
   }
@@ -328,4 +328,4 @@ customElements.define("tado-x-settings-history-card",TadoXSettingsHistoryCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-settings-history-card",
   name:"tado X hot-water and flow history",
-  description:"Automatic entity discovery and long-term HA Recorder charts for DHW and OpenTherm optimisation"});
+  description:"Unified tado X heating flow, hot water and outdoor temperature history"});
