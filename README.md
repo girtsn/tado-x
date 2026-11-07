@@ -1,5 +1,56 @@
 # tado X integration — Home Assistant fork
 
+
+## v2026.11.12 — three whole-home heating quick actions and a single temperature chart
+
+The Overview card now offers **Heating Off**, **Resume Schedules**, and
+**Boost 30 min** for all heating rooms, with explicit confirmation dialogs.
+Only the user can trigger these operations. They use one tado X HOPS request
+each and do not directly alter domestic hot water, boiler settings or the
+automatic flow-temperature adaptation toggle.
+
+Home Assistant Developer Tools equivalents:
+
+```yaml
+action: tado.x_heating_quick_action
+data:
+  action: off  # or resume / boost
+```
+
+Heating Off retains frost protection, Resume cancels manual heating overrides,
+and Boost sets maximum room temperatures for 30 minutes, after which the
+schedules resume. These actions follow tado X's app Quick Actions; the
+undocumented HOPS requests are not yet live-tested on this installation.
+
+The rebuilt history card puts **heating flow first**, followed by hot water,
+then a single graph with selectable maximum flow, tado-optimised flow,
+DHW target, and outside temperature. The awkward "Adaptation enabled time"
+label is replaced with **Automatic flow adaptation** (On/Off + optional
+historical enabled percentage). It uses the existing tado weather
+outdoor-temperature sensor by preference, or an explicitly configured outdoor
+entity (no extra cloud call):
+
+```yaml
+type: custom:tado-x-settings-history-card
+title: Heating flow and hot water
+# outdoor_entity: sensor.actual_outdoor_temperature
+```
+
+A full dashboard example, ready to paste into Home Assistant's **Raw
+configuration editor**, is at [examples/heating_dashboard.yaml](examples/heating_dashboard.yaml).
+Its tab order is **Overview → Consumption → Schedules**.
+
+Register/update the card JavaScript module with
+`/tado/x-settings-history-card.js?v=2026.11.12`.
+Only this card JS changed; the schedule and consumption resources can retain
+their existing working registration URLs if preferred.
+
+**Note:** Vaillant historical hourly statistics derived from daily
+backfill are not measured burner intervals. Per-room pre-November 2026
+allocations are provisional until we introduce a separate daily-weighted
+allocation model. This release leaves the existing statistics unchanged.
+
+
 ## v2026.11.11 — diagnose unallocated Vaillant heating-gas input
 
 Use this read-only Home Assistant action to explain which of the 35 days'
