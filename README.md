@@ -1,6 +1,10 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.18 — one history date picker across Heating cards
+
+The managed **tado X Heating** dashboard has one Energy-style date picker for all historical charts (including **Last 3 years** and custom dates), and the individual period button groups have been removed. Standalone cards use the same calendar picker instead of period buttons. JavaScript dependencies use manifest-versioned URLs, and the sidebar icon now uses a gas burner. Update through HACS and restart Home Assistant.
+
 ## v2026.11.17 — managed Heating panel cache busting
 
 The automatically installed `tado X Heating` sidebar panel now uses a

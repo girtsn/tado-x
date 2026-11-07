@@ -218,44 +218,88 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     }
 
 
-async def allocation_history(hass, main, period: str = "month") -> dict:
-    """Read the new external series; low-volume daily or monthly aggregates."""
+async def allocation_history(
+    hass, main, period: str = "month", *,
+    start_time: str | None = None, end_time: str | None = None,
+) -> dict:
+    """Read exact calendar ranges from Recorder; never modify source statistics.
+
+    The managed dashboard uses inclusive local calendar days (exclusive end).
+    Daily Recorder rows are requested even for multi-year views so a partial
+    first/last month is not accidentally counted in full.
+    """
     if period not in ("day", "week", "month", "year", "3years"):
         raise HomeAssistantError("Invalid history period")
     now = datetime.now(timezone.utc)
-    days = {"day": 2, "week": 8, "month": 33, "year": 370, "3years": 1100}[period]
-    period_key = "month" if period in ("year", "3years") else "day" if period in ("week","month") else "hour"
-    end = now.replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=days)
-    zones = {str(z["id"]): z.get("name",str(z["id"])) for z in main.zones}
+    tz = ZoneInfo(hass.config.time_zone or "UTC")
+    if (start_time is None) != (end_time is None):
+        raise HomeAssistantError("start_time and end_time must be supplied together")
+    if start_time is not None:
+        try:
+            start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            if start.utcoffset() is None or end.utcoffset() is None:
+                raise ValueError("Time zone offset is required")
+            start = start.astimezone(timezone.utc)
+            end = end.astimezone(timezone.utc)
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError("Invalid ISO 8601 history dates") from err
+        if start >= end or end - start > timedelta(days=1099):
+            raise HomeAssistantError("History range must be positive and at most 3 years")
+        duration = end - start
+        group = "hour" if duration <= timedelta(days=2) else (
+            "day" if duration <= timedelta(days=92) else "month"
+        )
+    else:
+        # Preserve backwards compatibility for service and standalone card users.
+        days = {"day": 2, "week": 8, "month": 33,
+                "year": 370, "3years": 1100}[period]
+        end = now.replace(minute=0, second=0, microsecond=0)
+        start = end - timedelta(days=days)
+        group = ("month" if period in ("year", "3years") else
+                 "day" if period in ("week", "month") else "hour")
+
+    # For precise custom ranges read daily rows and bucket them into months.
+    # This avoids counting whole months outside a custom date range.
+    query_period = "hour" if group == "hour" else "day"
+    zones = {str(z["id"]): z.get("name", str(z["id"])) for z in main.zones}
     zones["unallocated"] = "Unallocated"
-    ids = {_stat_id(main,zid) for zid in zones}
-    stats = await _fetch(hass, start-timedelta(days=35), end, ids, period_key)
+    ids = {_stat_id(main, zid) for zid in zones}
+    stats = await _fetch(
+        hass, start - timedelta(days=35), end, ids, query_period
+    )
     timeline: dict[str, dict] = {}
-    for zid,name in zones.items():
-        rows = sorted(stats.get(_stat_id(main,zid), []), key=lambda r:r["start"])
+    for zid, name in zones.items():
+        rows = sorted(stats.get(_stat_id(main, zid), []),
+                      key=lambda row: row["start"])
         previous = None
         for row in rows:
-            dt = _hour(row["start"]).astimezone(ZoneInfo("Europe/Brussels"))
-            if dt < start.astimezone(ZoneInfo("Europe/Brussels")):
+            dt = _hour(row["start"])
+            if dt < start:
                 previous = row.get("sum")
                 continue
+            if dt >= end:
+                break
             if previous is not None and row.get("sum") is not None:
-                delta = max(0, float(row["sum"])-float(previous))
-                key = dt.strftime("%Y-%m") if period_key=="month" else dt.strftime("%Y-%m-%d") if period_key=="day" else dt.strftime("%Y-%m-%dT%H:00")
-                slot=timeline.setdefault(key,{})
-                slot[name]=round(slot.get(name,0)+delta,3)
-            previous=row.get("sum")
+                delta = max(0, float(row["sum"]) - float(previous))
+                local = dt.astimezone(tz)
+                key = (local.strftime("%Y-%m") if group == "month" else
+                       local.strftime("%Y-%m-%d") if group == "day" else
+                       local.strftime("%Y-%m-%dT%H:00"))
+                slot = timeline.setdefault(key, {})
+                slot[name] = round(slot.get(name, 0) + delta, 3)
+            previous = row.get("sum")
     return {
         "period": period,
+        "start_time": start.isoformat(), "end_time": end.isoformat(),
         "unit": "kWh of estimated heating gas input",
         "source": "Vaillant hourly gas heating profile allocated by tado room demand",
         "capacity_basis": "Installed radiator EN442 75/65/20, v2 separate statistic IDs",
         "rooms": list(zones.values()),
-        "series": [{"period":key,**value} for key,value in sorted(timeline.items())],
+        "series": [{"period": key, **value}
+                   for key, value in sorted(timeline.items())],
         "note": "No history exists before the allocation service began recording. This does not measure radiator heat output.",
     }
-
 
 
 async def diagnose_unallocated(hass, main, *, days: int = 35,

@@ -1,3 +1,4 @@
+const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
 /* Long-term tado X settings chart, using locally recorded HA statistics.
  * Detects entities from their unique suffixes, no hard-coded home-specific IDs.
  * Built-in number/switch/select more-info dialog provides editing controls.
@@ -10,22 +11,22 @@ const XH_SOURCES = [
 ];
 const XH_OUTDOOR={id:"outdoor",title:"Outside temperature",domain:"sensor",unit:"°C",color:"#8363b9"};
 
-const XH_PERIODS=[
-  {key:"day",label:"24h",days:1,period:"hour"},
-  {key:"week",label:"7 days",days:7,period:"hour"},
-  {key:"month",label:"90 days",days:90,period:"day"},
-  {key:"year",label:"1 year",days:366,period:"month"},
-  {key:"3years",label:"3 years",days:1097,period:"month"},
-];
 class TadoXSettingsHistoryCard extends HTMLElement {
   constructor(){
     super();this.attachShadow({mode:"open"});this._cfg={};
-    this._hass=null;this._once=false;this._period="week";
+    this._hass=null;this._once=false;
+    this._dateRange=xhPresetRange("week");this._requestId=0;
     this._series={};this._busy=false;this._message="";
     this._hidden=new Set();this._actionBusy=false;this._actionMessage="";
     this._statusTicker=null;
   }
   setConfig(cfg){this._cfg=cfg||{};this._render();}
+  set dateRange(range){
+    if(!range || (this._dateRange?.start===range.start &&
+                   this._dateRange?.end===range.end))return;
+    this._dateRange=range;
+    if(this._once)this._load();
+  }
   set hass(hass){
     this._hass=hass;
     if(!this._once && hass){this._once=true;this._load();}
@@ -66,7 +67,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     }));
   }
   async _load(){
-    if(this._busy||!this._hass)return;
+    if(!this._hass)return;
+    const request=++this._requestId;
     this._busy=true;this._render();
     try{
       const ids=[...new Set([
@@ -74,17 +76,20 @@ class TadoXSettingsHistoryCard extends HTMLElement {
         this._outdoorId(),
       ].filter(Boolean))];
       if(!ids.length)throw Error("No historical temperature sensors found. Update the tado X integration and restart Home Assistant.");
-      const range=XH_PERIODS.find(x=>x.key===this._period);
-      const end=new Date(),start=new Date(end.getTime()-range.days*86400000);
+      const end=new Date(this._dateRange.end);
+      const start=new Date(this._dateRange.start);
+      const days=(end-start)/86400000;
+      const granularity=days<=2?"hour":days<=92?"day":"month";
       const result=await this._hass.callWS({
         type:"recorder/statistics_during_period",
         start_time:start.toISOString(),end_time:end.toISOString(),
-        statistic_ids:ids,period:range.period,
+        statistic_ids:ids,period:granularity,
         types:["mean","min","max"],
       });
-      this._series=result||{};this._message="";
-    }catch(e){this._message="History unavailable: "+(e?.message||e);this._series={};}
-    finally{this._busy=false;this._render();}
+      if(request===this._requestId){this._series=result||{};this._message="";}
+    }catch(e){if(request===this._requestId){
+      this._message="History unavailable: "+(e?.message||e);this._series={};
+    }}finally{if(request===this._requestId){this._busy=false;this._render();}}
   }
   _el(tag,text,cls){
     const node=document.createElement(tag);
@@ -152,9 +157,9 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     return tile;
   }
   _dateLabel(ts){
-    const opts=this._period==="day"?{hour:"2-digit",minute:"2-digit"}:
-      (this._period==="year"||this._period==="3years")
-        ?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
+    const days=(new Date(this._dateRange.end)-new Date(this._dateRange.start))/86400000;
+    const opts=days<=2?{hour:"2-digit",minute:"2-digit"}:
+      days>92?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
     return new Date(ts).toLocaleString(undefined,opts);
   }
   _combinedChart(){
@@ -183,8 +188,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       wrap.append(this._el("p","No recorded temperatures for these lines yet. Historical settings begin when the sensors were installed.","note"));
       return wrap;
     }
-    const period=XH_PERIODS.find(p=>p.key===this._period);
-    const maxTime=Date.now(),minTime=maxTime-period.days*86400000;
+    const maxTime=new Date(this._dateRange.end).getTime();
+    const minTime=new Date(this._dateRange.start).getTime();
     const values=visible.flatMap(i=>i.rows.map(p=>p.y));
     let low=Math.floor((Math.min(...values)-2)/5)*5;
     let high=Math.ceil((Math.max(...values)+2)/5)*5;
@@ -216,8 +221,10 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       label.textContent=this._dateLabel(when);svg.append(label);
     }
     for(const item of visible){
-      const maxGap=period.period==="hour"?4*3600000:
-        period.period==="day"?4*86400000:65*86400000;
+      const days=(maxTime-minTime)/86400000;
+      const grouping=days<=2?"hour":days<=92?"day":"month";
+      const maxGap=grouping==="hour"?4*3600000:
+        grouping==="day"?4*86400000:65*86400000;
       let segment=[],previous=null;
       const segments=[];
       for(const p of item.rows){
@@ -461,11 +468,13 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     dhw.append(this._tile("Hot-water target",
       this._state(target.control,"number"),"°C","Target, not measured tank temperature"));
     card.append(dhw);
-    const tabs=this._el("div",null,"tabs");
-    for(const range of XH_PERIODS){
-      tabs.append(this._button(range.label,
-        ()=>{this._period=range.key;this._load();},this._period===range.key));
+    if(!this._cfg.shared_date_range){
+      const picker=this._el("tado-x-date-range-picker");
+      picker.range=this._dateRange;
+      picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
+      card.append(picker);
     }
+    const tabs=this._el("div",null,"tabs");
     tabs.append(this._button("Refresh",()=>this._load()));
     card.append(tabs);
     card.append(this._combinedChart());

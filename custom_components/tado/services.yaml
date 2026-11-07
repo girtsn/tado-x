@@ -257,6 +257,18 @@ x_heating_allocation_history:
             - month
             - year
             - 3years
+    start_time:
+      required: false
+      description: ISO 8601 start with timezone offset; supply together with end_time.
+      example: "2026-11-01T00:00:00+01:00"
+      selector:
+        text:
+    end_time:
+      required: false
+      description: Exclusive ISO 8601 end with timezone offset; supply with start_time.
+      example: "2026-11-08T00:00:00+01:00"
+      selector:
+        text:
     config_entry:
       required: false
       selector:

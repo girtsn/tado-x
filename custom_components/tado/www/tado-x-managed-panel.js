@@ -3,9 +3,16 @@
  * manual JS Resources configuration needed. Bundled JS cards are loaded
  * from the same integration's static routes on each HACS update.
  */
-import "./x-settings-history-card.js";
-import "./x-schedule-card.js";
-import "./x-heating-energy-card.js";
+/* Each dependency must use the panel's manifest-version cache key.
+ * Versioning only the entry module leaves its static imports cached.
+ */
+const XH_ASSET_VERSION=new URL(import.meta.url).searchParams.get("v")||"dev";
+const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(XH_ASSET_VERSION));
+await Promise.all([
+  import("./x-settings-history-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
+  import("./x-schedule-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
+  import("./x-heating-energy-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
+]);
 
 class TadoXManagedHeatingPanel extends HTMLElement {
   constructor(){
@@ -18,6 +25,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     this._cards=[];
     this._lastEnergy=null;
     this._initialized=false;
+    this._dateRange=xhPresetRange("week");
   }
   set hass(value){
     this._hass=value;
@@ -34,7 +42,14 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   set panel(value){
     const oldId=this._panel?.config?.config_entry;
+    const oldVersion=this._panel?.config?.integration_version;
     this._panel=value;
+    // When the HA frontend delivers a newly registered panel after a restart,
+    // reload once so the new manifest-versioned JS is loaded automatically.
+    if(oldVersion && value?.config?.integration_version &&
+       oldVersion!==value.config.integration_version){
+      window.location.reload();return;
+    }
     if(this._hass && oldId!==value?.config?.config_entry)this._render();
   }
   set narrow(value){this._narrow=Boolean(value);}
@@ -69,7 +84,9 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   _card(type,title){
     const el=document.createElement(type);
-    el.setConfig({title,config_entry:this._panel?.config?.config_entry});
+    el.setConfig({title,config_entry:this._panel?.config?.config_entry,
+      shared_date_range:this._tab==="overview"});
+    if(this._tab==="overview")el.dateRange=this._dateRange;
     el.hass=this._hass;
     this._cards.push(el);
     return el;
@@ -128,6 +145,15 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     shell.append(tabs);
 
     if(this._tab==="overview"){
+      const picker=this._element("tado-x-date-range-picker");
+      picker.range=this._dateRange;
+      picker.addEventListener("date-range-changed",event=>{
+        this._dateRange=event.detail;
+        for(const card of this._cards){
+          if("dateRange" in card)card.dateRange=this._dateRange;
+        }
+      });
+      shell.append(picker);
       const layout=this._element("main",null,"layout");
       const main=this._element("div",null,"stack");
       main.append(this._card("tado-x-settings-history-card",

@@ -80,6 +80,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         StaticPathConfig("/tado/x-settings-history-card.js",
                          str(folder / "tado-x-settings-history-card.js"),
                          cache_headers=False),
+        StaticPathConfig("/tado/x-date-range-picker.js",
+                         str(folder / "tado-x-date-range-picker.js"),
+                         cache_headers=False),
         StaticPathConfig("/tado/x-managed-panel.js",
                          str(folder / "tado-x-managed-panel.js"),
                          cache_headers=False),
@@ -172,11 +175,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 frontend_url_path="tado-x-heating",
                 webcomponent_name="tado-x-managed-heating-panel",
                 sidebar_title="tado X Heating",
-                sidebar_icon="mdi:home-thermometer",
+                sidebar_icon="mdi:gas-burner",
                 module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}",
                 config={
                     "config_entry": entry.entry_id,
                     "home_id": str(coordinator.home_id),
+                    "integration_version": INTEGRATION_VERSION,
                 },
                 require_admin=False,
             )
