@@ -9,6 +9,7 @@ import PyTado
 import PyTado.exceptions
 from PyTado.interface import Tado
 
+from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
@@ -77,6 +78,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                          cache_headers=False),
         StaticPathConfig("/tado/x-settings-history-card.js",
                          str(folder / "tado-x-settings-history-card.js"),
+                         cache_headers=False),
+        StaticPathConfig("/tado/x-managed-panel.js",
+                         str(folder / "tado-x-managed-panel.js"),
                          cache_headers=False),
     ])
     return True
@@ -154,6 +158,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
         await coordinator.x_heating_modes.async_start()
         entry.async_on_unload(coordinator.x_heating_modes.async_stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    if coordinator.is_x and not frontend.async_panel_exists(
+        hass, "tado-x-heating"
+    ):
+        # A fully integration-managed Heating panel: no YAML dashboard,
+        # frontend resource registration or config-file editing is needed.
+        # Use a separate URL so existing user dashboards stay untouched.
+        try:
+            await panel_custom.async_register_panel(
+                hass,
+                frontend_url_path="tado-x-heating",
+                webcomponent_name="tado-x-managed-heating-panel",
+                sidebar_title="tado X Heating",
+                sidebar_icon="mdi:home-thermometer",
+                module_url="/tado/x-managed-panel.js",
+                require_admin=False,
+            )
+        except (ValueError, RuntimeError):
+            # A conflicting sidebar panel must not break tado entities.
+            _LOGGER.warning(
+                "Unable to register the integration-managed tado X Heating "
+                "panel; existing dashboards remain usable",
+                exc_info=True,
+            )
 
     if coordinator.is_x and energy_enabled(entry):
         coordinator.x_allocation_lock = asyncio.Lock()
