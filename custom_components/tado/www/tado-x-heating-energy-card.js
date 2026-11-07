@@ -129,7 +129,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     root.append(card);
   }
 }
-customElements.define("tado-x-heating-energy-card",TadoXHeatingEnergyCard);
+if(!customElements.get("tado-x-heating-energy-card")) customElements.define("tado-x-heating-energy-card",TadoXHeatingEnergyCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-heating-energy-card",
  name:"tado X heating gas allocation",description:"Estimated per-room gas input, using Vaillant and tado Recorder statistics"});

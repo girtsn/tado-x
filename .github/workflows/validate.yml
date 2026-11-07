@@ -25,6 +25,7 @@ jobs:
           node --check custom_components/tado/www/tado-x-schedule-card.js
           node --check custom_components/tado/www/tado-x-heating-energy-card.js
           node --check custom_components/tado/www/tado-x-settings-history-card.js
+          node --input-type=module --check < custom_components/tado/www/tado-x-managed-panel.js
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
@@ -33,7 +34,7 @@ jobs:
           base = Path('custom_components/tado')
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
-          assert manifest['version']=='2026.11.15'
+          assert manifest['version']=='2026.11.16'
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY

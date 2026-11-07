@@ -1,6 +1,9 @@
-# General-purpose Heating dashboard for tado X.
-# No Vaillant, myPyllant or particular home's installed radiator inventory.
-# The three core cards are served by the public tado integration.
+# Single tado X Heating dashboard for everyone.
+# General controls need no options. Household Vaillant heating consumption
+# appears as a section ONLY if the optional energy feature is enabled.
+# Home Assistant does not support state-conditional top-level view tabs.
+# If the binary sensor's entity ID was customized, update the one
+# 'visibility' condition below to its actual entity ID.
 title: Heating
 views:
   - title: Overview
@@ -16,37 +19,67 @@ views:
             heading_style: title
             icon: mdi:heating-coil
           - type: custom:tado-x-settings-history-card
-            title: Heating flow, hot water and outdoor temperature
-            # Optional weather sensor override:
+            title: Heating flow, hot water and outside temperature
+            # Optional override:
             # outdoor_entity: sensor.outdoor_temperature
             grid_options:
               columns: full
+
       - type: grid
         cards:
           - type: heading
-            heading: Heating controls
+            heading: Whole-home heating controls
             heading_style: title
             icon: mdi:home-thermometer
           - type: markdown
             content: |-
-              **Whole-home tado X heating actions**
+              **Included for all tado X users**
 
-              - Heating Off: enter frost protection
-              - Resume Schedules: restore room schedules
-                and automatic flow adaptation
-              - Eco Boost: 30-minute maximum room heating
-                with automatic flow adaptation enabled
-              - Top Boost: 30-minute maximum room heating
-                with automatic flow adaptation temporarily off
+              Heating Off enters frost protection.
+              Resume Schedules cancels room overrides and restores
+              automatic flow adaptation.
 
-              Both boosts have a restart-safe recovery deadline.
-              The mode indicator compares saved actions with
-              the currently reported room schedule status.
+              Eco Boost requests 30 minutes of maximum room heating
+              with adaptation enabled. Top Boost also temporarily
+              disables flow adaptation. Both have restart-safe recovery.
 
-              Temperature limits are targets and calculations,
-              not actual measured boiler outlet temperature.
+              The current mode and schedule/manual room overrides
+              are shown in the heating flow card.
             grid_options:
               columns: full
+
+      # This ENTIRE section is conditional, including its heading.
+      # The read-only binary sensor mirrors the ONE optional integration
+      # checkbox: Vaillant/myPyllant household energy allocation.
+      - type: grid
+        visibility:
+          - condition: state
+            entity: binary_sensor.tado_x_vaillant_energy_enabled
+            state: "on"
+        cards:
+          - type: heading
+            heading: Vaillant heating consumption by room
+            heading_style: title
+            icon: mdi:fire
+          - type: custom:tado-x-heating-energy-card
+            title: Estimated heating gas input by room
+            grid_options:
+              columns: full
+          - type: markdown
+            content: |-
+              **Optional household energy model**
+
+              Gas-heating input from myPyllant is allocated using
+              each room's recorded tado X heating demand and the
+              installed radiators' configured EN442 capacities.
+
+              Historic Vaillant hourly values derived by evenly
+              spreading daily totals are provisional for room
+              allocation. These estimates are not measurements of
+              heat delivered by individual radiator valves.
+            grid_options:
+              columns: full
+
   - title: Schedules
     path: schedules
     icon: mdi:calendar-clock
@@ -56,18 +89,16 @@ views:
       - type: grid
         cards:
           - type: heading
-            heading: Room heating programmes
+            heading: tado X weekly heating schedules
             heading_style: title
             icon: mdi:calendar-clock
           - type: custom:tado-x-schedule-card
-            title: tado X weekly room schedules
+            title: Room schedule editor
             grid_options:
               columns: full
           - type: markdown
             content: >-
-              All room schedule controls use tado X APIs.
-              Changes to programmes are sent only when saved.
-              Room-level schedule status is also available
-              as standard Home Assistant sensors.
+              Room schedules, save and copy functions, and manual-override
+              detection are supported by tado X independently of Vaillant.
             grid_options:
               columns: full
