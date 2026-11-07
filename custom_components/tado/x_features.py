@@ -1,7 +1,7 @@
 """Opt-in features for a shared/public tado integration.
 
-Core tado entities are always supported. Advanced tado X controls and the
-household-specific radiator + myPyllant model are separate per-home options.
+All generic tado X controls are enabled by default; only the household-
+specific radiator + myPyllant model is a per-home option.
 
 No home IDs, addresses, email addresses or account identifiers appear here.
 Only preexisting Recorder statistics for THIS tado home can activate the
@@ -13,14 +13,10 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 from .const import (
-    CONF_X_ADVANCED, CONF_X_HOME_ENERGY, CONF_X_LEGACY_ENERGY_PROBE,
+    CONF_X_HOME_ENERGY, CONF_X_LEGACY_ENERGY_PROBE,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def advanced_enabled(entry) -> bool:
-    return entry.options.get(CONF_X_ADVANCED) is True
 
 
 def energy_enabled(entry) -> bool:
