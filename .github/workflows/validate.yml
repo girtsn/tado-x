@@ -22,10 +22,9 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Validate dashboard JavaScript syntax
         run: |
-          node --check custom_components/tado/www/tado-x-schedule-card.js
-          node --check custom_components/tado/www/tado-x-heating-energy-card.js
-          node --check custom_components/tado/www/tado-x-settings-history-card.js
-          node --input-type=module --check < custom_components/tado/www/tado-x-managed-panel.js
+          for script in custom_components/tado/www/*.js; do
+            node --input-type=module --check < "$script"
+          done
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
@@ -34,7 +33,7 @@ jobs:
           base = Path('custom_components/tado')
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
-          assert manifest['version']=='2026.11.18'
+          assert manifest['version']=='2026.11.18b1'
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY
