@@ -1,5 +1,9 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.21 — recover from intermittent blank Heating panel
+
+The integration-managed Heating panel registers before importing its dependent frontend cards. Slow or temporarily failed imports show a loading message with an explicit retry button instead of a blank page. One-time version change reload is protected against a refresh loop. No heating logic, cloud API calls, schedules or private automations changed.
+
 ## v2026.11.20 — keep private Home Assistant automations outside HACS
 
 Removed the household-specific device availability email automation from

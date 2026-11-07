@@ -41,6 +41,18 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn('cache_headers=False', backend)
 
 
+    def test_sidebar_module_loading_is_nonblocking_and_recoverable(self):
+        panel = (TADO / "www" / "tado-x-managed-panel.js").read_text()
+        self.assertNotIn('const {xhPresetRange}=await import(', panel)
+        self.assertIn('let xhPresetRange=null', panel)
+        self.assertIn('this._ensureAssets();', panel)
+        self.assertIn('this._assetsReady', panel)
+        self.assertIn('Retry loading', panel)
+        self.assertIn('this._renderAssetStatus();', panel)
+        self.assertIn('tado-x-panel-reload-', panel)
+        self.assertIn('window.sessionStorage.getItem(key)', panel)
+        self.assertIn('new URL(import.meta.url)', panel)
+
     def test_exact_range_supported_on_both_history_cards(self):
         backend = (TADO / "heat_allocation.py").read_text()
         service = (TADO / "services.py").read_text()
