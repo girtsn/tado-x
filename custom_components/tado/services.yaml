@@ -262,3 +262,48 @@ x_heating_allocation_history:
       selector:
         config_entry:
           integration: tado
+
+x_radiator_capacity_report:
+  name: Review installed radiator outputs and tado room mapping
+  description: >-
+    Read-only comparison of your 11 radiator inventory with the 10 tado
+    rooms, showing EN442 75/65/20 rated watts, totals per room, manual
+    overrides and unmatched/mismatched rooms. No cloud calls.
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_apply_radiator_capacities:
+  name: Apply installed radiator rated output to room weights
+  description: >-
+    Persist safely matched EN442 rated capacities as local Home Assistant
+    room weighting numbers. By default previews only, and preserves
+    existing manual overrides. Never changes tado heating schedules,
+    boiler configuration or Vaillant source statistics.
+  fields:
+    dry_run:
+      required: false
+      default: true
+      selector:
+        boolean:
+    overwrite_existing:
+      required: false
+      default: false
+      selector:
+        boolean:
+    include_inferred_r11:
+      required: false
+      default: false
+      description: >-
+        Include R11 attic bathroom (700 x 1200 T33) carried forward from
+        the earlier inventory, not repeated in the later R01-R10 list.
+      selector:
+        boolean:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
