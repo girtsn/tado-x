@@ -39,8 +39,19 @@ fake_module("homeassistant.exceptions",
             HomeAssistantError=type("HomeAssistantError",(Exception,),{}))
 
 SOURCE=Path(__file__).resolve().parents[1]/"custom_components"/"tado"/"heat_allocation.py"
-spec=importlib.util.spec_from_file_location("heat_allocation",SOURCE)
-allocation=importlib.util.module_from_spec(spec);spec.loader.exec_module(allocation)
+# Load the new radiator inventory module via its package name, without
+# importing the actual Home Assistant installation into offline unit tests.
+fake_module("custom_components", __path__=[])
+fake_module("custom_components.tado", __path__=[])
+inv_name="custom_components.tado.radiator_inventory"
+inv_spec=importlib.util.spec_from_file_location(inv_name,SOURCE.with_name("radiator_inventory.py"))
+inventory=importlib.util.module_from_spec(inv_spec)
+sys.modules[inv_name]=inventory
+inv_spec.loader.exec_module(inventory)
+spec=importlib.util.spec_from_file_location("custom_components.tado.heat_allocation",SOURCE)
+allocation=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=allocation
+spec.loader.exec_module(allocation)
 
 
 class AllocationTests(unittest.TestCase):
