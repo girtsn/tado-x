@@ -1,5 +1,30 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.11 — diagnose unallocated Vaillant heating-gas input
+
+Use this read-only Home Assistant action to explain which of the 35 days'
+hours produced **Unallocated** gas in the Vaillant/tado room split:
+
+```yaml
+action: tado.x_diagnose_unallocated_heating
+data:
+  days: 35
+  limit: 30
+response_variable: diagnosis
+```
+
+The result has `causes.missing_or_invalid_room_demand` and
+`causes.all_rooms_zero_demand` with separate hours and kWh, a room-by-room
+missing-data count, date breakdown, and highest-energy hours in Brussels
+local time. For zero-demand hours, adjacent-hour activity is reported to
+help investigate timing differences. No historical statistics, radiator
+ratings or tado/Vaillant settings are modified.
+
+The consumption card footer now correctly states **11 radiators, 10 rooms,
+25.748 kW at EN442 75/65/20°C**, rather than the obsolete 1 kW-per-valve
+default.
+
+
 ## v2026.11.10 — all 10 actual tado room names now match automatically
 
 The live `tado.x_radiator_capacity_report` identified four additional exact

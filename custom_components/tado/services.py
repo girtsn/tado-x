@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import selector
 
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
-from .heat_allocation import allocate_recent, allocation_history
+from .heat_allocation import allocate_recent, allocation_history, diagnose_unallocated
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 
 from .const import (
@@ -224,6 +224,27 @@ def setup_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({**home, vol.Optional("period", default="month"):
                            vol.In(["day", "week", "month", "year", "3years"])}),
         supports_response=SupportsResponse.ONLY,
+    )
+
+    async def x_diagnose_unallocated(call: ServiceCall) -> dict:
+        """Read-only local Recorder diagnostic, never changing estimates."""
+        main = get_x_coordinator(call)
+        return await diagnose_unallocated(
+            hass, main, days=call.data.get("days", 35),
+            limit=call.data.get("limit", 30),
+        )
+
+    hass.services.async_register(
+        DOMAIN, "x_diagnose_unallocated_heating", x_diagnose_unallocated,
+        schema=vol.Schema({
+            **home,
+            vol.Optional("days", default=35): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=35)
+            ),
+            vol.Optional("limit", default=30): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=100)
+            ),
+        }), supports_response=SupportsResponse.ONLY,
     )
 
     async def x_radiator_capacities(call: ServiceCall) -> dict:

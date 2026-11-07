@@ -255,3 +255,202 @@ async def allocation_history(hass, main, period: str = "month") -> dict:
         "series": [{"period":key,**value} for key,value in sorted(timeline.items())],
         "note": "No history exists before the allocation service began recording. This does not measure radiator heat output.",
     }
+
+
+
+async def diagnose_unallocated(hass, main, *, days: int = 35,
+                               limit: int = 30) -> dict:
+    """Explain each unallocated gas-input hour without changing any statistics.
+
+    Mirrors allocate_recent()'s source, UTC bucket alignment and decision
+    tree. Separately counts unknown/invalid room measurements and genuine
+    all-zero room demand. Reports highest-energy hours and daily breakdowns,
+    plus adjacent-hour activity as a clue to timing; it does not reallocate.
+    """
+    if not 1 <= days <= MAX_BACKFILL_DAYS:
+        raise HomeAssistantError("Diagnostic days must be 1–35")
+    if not 1 <= limit <= 100:
+        raise HomeAssistantError("Diagnostic limit must be 1–100")
+    if not getattr(main, "is_x", False):
+        raise HomeAssistantError("Unallocated heating diagnostic requires tado X")
+    source_id = _gas_statistic(hass)
+    if source_id is None:
+        return {
+            "status": "no_unique_vaillant_gas_heating_statistic",
+            "read_only": True,
+            "message": "Requires the running myPyllant hourly Gas Heating profile.",
+        }
+    room_sensors = _room_sensor_ids(hass, main)
+    names = {str(z["id"]): str(z.get("name", z["id"])) for z in main.zones}
+    if len(room_sensors) != len(main.zones):
+        return {
+            "status": "room_heating_sensors_not_ready", "read_only": True,
+            "rooms_found": len(room_sensors), "rooms_expected": len(main.zones),
+        }
+
+    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=days)
+    # One hour before for the Vaillant cumulative gas delta; one after for a
+    # comparison with the following tado room-demand hour when available.
+    snapshots = await _fetch(
+        hass, start - timedelta(hours=1), end + timedelta(hours=1),
+        set(room_sensors.values()) | {source_id},
+    )
+    source = _rows_by_start(snapshots.get(source_id))
+    room_history = {
+        zid: _rows_by_start(snapshots.get(entity_id))
+        for zid, entity_id in room_sensors.items()
+    }
+
+    categories = {
+        "missing_or_invalid_room_demand": {"hours": 0, "gas_kwh": 0.0,
+                                           "hours_with_other_rooms_active": 0},
+        "all_rooms_zero_demand": {"hours": 0, "gas_kwh": 0.0,
+                                  "hours_with_adjacent_demand": 0},
+    }
+    missing_by_room = {
+        zid: {"room": names[zid], "hours": 0, "gas_kwh_affected": 0.0}
+        for zid in room_sensors
+    }
+    daily: dict[str, dict] = {}
+    details = []
+    valid_hours = 0
+    valid_gas_kwh = 0.0
+    unallocated = 0.0
+    skipped_gas_hours = 0
+    for idx in range(days * 24):
+        hour = start + timedelta(hours=idx)
+        t = hour.timestamp()
+        previous_t = t - 3600
+        current, previous = source.get(t), source.get(previous_t)
+        if (current is None or previous is None
+                or current.get("sum") is None or previous.get("sum") is None):
+            skipped_gas_hours += 1
+            continue
+        diff = float(current["sum"]) - float(previous["sum"])
+        if not 0 <= diff <= 200000:
+            skipped_gas_hours += 1
+            continue
+        gas_kwh = diff * KWH_PER_WH
+        valid_hours += 1
+        valid_gas_kwh += gas_kwh
+        if gas_kwh <= 0:
+            continue
+
+        room_values = {}
+        missing = []
+        positive = []
+        for zid, row_map in room_history.items():
+            row = row_map.get(t)
+            raw_value = row.get("mean") if row is not None else None
+            try:
+                val = float(raw_value) if raw_value is not None else None
+            except (TypeError, ValueError):
+                val = None
+            if val is None or not 0 <= val <= 100:
+                missing.append(zid)
+            else:
+                room_values[zid] = val
+                if val > 0:
+                    positive.append(zid)
+        if not missing and positive:
+            continue
+
+        reason = ("missing_or_invalid_room_demand" if missing
+                  else "all_rooms_zero_demand")
+        bucket = categories[reason]
+        bucket["hours"] += 1
+        bucket["gas_kwh"] += gas_kwh
+        unallocated += gas_kwh
+
+        previous_hour_active = any(
+            row_map.get(t - 3600) is not None
+            and isinstance(row_map[t - 3600].get("mean"), (int, float))
+            and row_map[t - 3600]["mean"] > 0
+            for row_map in room_history.values()
+        )
+        next_hour_active = any(
+            row_map.get(t + 3600) is not None
+            and isinstance(row_map[t + 3600].get("mean"), (int, float))
+            and row_map[t + 3600]["mean"] > 0
+            for row_map in room_history.values()
+        )
+        if missing:
+            if positive:
+                bucket["hours_with_other_rooms_active"] += 1
+            for zid in missing:
+                missing_by_room[zid]["hours"] += 1
+                missing_by_room[zid]["gas_kwh_affected"] += gas_kwh
+        elif previous_hour_active or next_hour_active:
+            bucket["hours_with_adjacent_demand"] += 1
+
+        local = hour.astimezone(ZoneInfo("Europe/Brussels"))
+        date_key = local.strftime("%Y-%m-%d")
+        day = daily.setdefault(date_key, {
+            "date": date_key,
+            "gas_kwh_unallocated": 0.0,
+            "missing_demand_kwh": 0.0,
+            "zero_demand_kwh": 0.0,
+            "hours": 0,
+        })
+        day["gas_kwh_unallocated"] += gas_kwh
+        day["hours"] += 1
+        day["missing_demand_kwh" if missing else "zero_demand_kwh"] += gas_kwh
+        details.append({
+            "start_local": local.isoformat(timespec="minutes"),
+            "start_utc": hour.isoformat(timespec="minutes"),
+            "reason": reason,
+            "gas_kwh": round(gas_kwh, 3),
+            "missing_rooms": [names[zid] for zid in missing],
+            "positive_demand_rooms": [
+                {"room": names[zid], "demand_percent": round(room_values[zid], 1)}
+                for zid in positive
+            ],
+            "previous_hour_any_room_active": previous_hour_active,
+            "next_hour_any_room_active": next_hour_active,
+        })
+
+    for category in categories.values():
+        category["gas_kwh"] = round(category["gas_kwh"], 3)
+    for row in missing_by_room.values():
+        row["gas_kwh_affected"] = round(row["gas_kwh_affected"], 3)
+    for row in daily.values():
+        for key in ("gas_kwh_unallocated", "missing_demand_kwh",
+                    "zero_demand_kwh"):
+            row[key] = round(row[key], 3)
+    missing_ranking = sorted(
+        [v for v in missing_by_room.values() if v["hours"]],
+        key=lambda row: (-row["gas_kwh_affected"], row["room"]),
+    )
+    return {
+        "status": "diagnostic_completed",
+        "read_only": True,
+        "days": days,
+        "period_start_utc": start.isoformat(timespec="minutes"),
+        "period_end_utc": end.isoformat(timespec="minutes"),
+        "gas_profile": source_id,
+        "gas_kwh_in_valid_hours": round(valid_gas_kwh, 3),
+        "valid_gas_hours": valid_hours,
+        "skipped_gas_hours": skipped_gas_hours,
+        "unallocated_kwh": round(unallocated, 3),
+        "unallocated_percent": round(
+            100 * unallocated / valid_gas_kwh, 2
+        ) if valid_gas_kwh else 0,
+        "causes": categories,
+        "missing_room_breakdown": missing_ranking,
+        "days_with_unallocated": sorted(
+            daily.values(),
+            key=lambda row: (-row["gas_kwh_unallocated"], row["date"]),
+        ),
+        "highest_unallocated_hours": sorted(
+            details, key=lambda row: (-row["gas_kwh"], row["start_utc"])
+        )[:limit],
+        "total_unallocated_hours": len(details),
+        "explanation": (
+            "Missing demand for even one room assigns the whole hour to "
+            "Unallocated. All-zero demand with Vaillant gas input is the "
+            "other cause. Adjacent-hour activity is a timing clue, not proof. "
+            "All amounts are gas INPUT, not measured room heat. This service "
+            "does not change historic or current allocations."
+        ),
+    }

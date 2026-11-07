@@ -337,3 +337,37 @@ x_assign_radiator_room:
       selector:
         config_entry:
           integration: tado
+
+x_diagnose_unallocated_heating:
+  name: Diagnose unallocated heating gas
+  description: >-
+    Read-only 1–35 day Recorder analysis explaining why Vaillant gas-heating
+    input was not assigned to tado X heating rooms. Separates missing or
+    invalid room demand measurements from hours where all tado rooms report
+    zero demand, ranks affected dates and highest-energy hours, and checks
+    adjacent-hour room activity as a clue to timing. Does not edit
+    consumption statistics, radiator weights or cloud/boiler controls.
+  fields:
+    days:
+      required: false
+      default: 35
+      selector:
+        number:
+          min: 1
+          max: 35
+          step: 1
+          mode: box
+    limit:
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          mode: box
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
