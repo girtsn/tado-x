@@ -32,6 +32,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_X_ADVANCED,
     CONF_X_HOME_ENERGY,
+    CONF_X_LEGACY_ENERGY_PROBE,
     CONST_OVERLAY_TADO_DEFAULT,
     CONST_OVERLAY_TADO_OPTIONS,
     DOMAIN,
@@ -196,7 +197,12 @@ class OptionsFlowHandler(OptionsFlow):
             # Keep private per-room capacities and mapping overrides. HA
             # options forms submit only the visible fields, not the hidden
             # options used by existing allocations.
-            options = {**self.config_entry.options, **user_input}
+            options = {
+                **self.config_entry.options,
+                **user_input,
+                # A direct user choice wins over any pending upgrade probe.
+                CONF_X_LEGACY_ENERGY_PROBE: False,
+            }
             result = self.async_create_entry(data=options)
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
             return result
