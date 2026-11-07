@@ -273,9 +273,16 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     const ts=a.due_utc?Date.parse(a.due_utc):NaN;
     const seconds=Number.isFinite(ts)?Math.max(0,Math.ceil((ts-Date.now())/1000)):null;
     const boostActive=a.boost_timer_active===true;
-    const countdown=boostActive&&seconds!==null
-      ?seconds>0?" — "+Math.ceil(seconds/60)+" min remaining":" — restoring schedules"
-      :a.kind==="adapt_only"?" — re-enabling adaptation":"";
+    const boostPending=a.pending===true && a.kind==="resume_and_adapt" &&
+      (a.mode==="eco_boost" || a.mode==="top_boost");
+    const remaining=seconds===null?"deadline unknown":
+      seconds>0?Math.ceil(seconds/60)+" min":"recovery due";
+    const countdown=boostActive?" — "+remaining:
+      a.kind==="adapt_only"?" — re-enabling adaptation":"";
+    const pendingNote=boostPending && !boostActive
+      ?(a.mode_label||"Boost")+" recovery timer still pending: "+remaining+
+        ". Room states currently indicate "+(a.observed_mode_label||"unknown")+"."
+      :null;
     const manual=typeof a.manual_override_count==="number"?a.manual_override_count:null;
     const following=typeof a.rooms_following_schedule==="number"?a.rooms_following_schedule:null;
     const unknown=typeof a.rooms_unknown==="number"?a.rooms_unknown:null;
@@ -293,7 +300,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       note:boostActive
         ?"Boost initiated through Home Assistant; room override status is reported by tado."
         :"Schedule/override status comes from tado room polling (normally every 5 minutes).",
-      recoveryError:a.last_recovery_error||null
+      recoveryError:a.last_recovery_error||null,
+      pendingNote
     };
   }
   async _quickAction(action){
@@ -422,6 +430,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     if(mode.adaptation===false)
       indicator.append(this._el("small",
         "Automatic flow adaptation is disabled","mode-warning"));
+    if(mode.pendingNote)
+      indicator.append(this._el("small",mode.pendingNote,"mode-warning"));
     if(mode.recoveryError)indicator.append(this._el(
       "small","Recovery warning: "+mode.recoveryError,"mode-warning"
     ));
