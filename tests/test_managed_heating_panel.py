@@ -29,7 +29,9 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn("household_vaillant_mypyllant_gas_allocation", panel)
         self.assertIn("this._tab===\"overview\"", panel)
         self.assertIn("date-range-changed", panel)
-        self.assertIn('"last3years"', panel)
+        picker = (TADO / "www" / "tado-x-date-range-picker.js").read_text()
+        self.assertIn('"last3years"', picker)
+        self.assertIn('x-date-range-picker.js?v=', panel)
         self.assertIn("shared_date_range:this._tab", panel)
         self.assertIn('new URL(import.meta.url)', panel)
         self.assertIn('encodeURIComponent(XH_ASSET_VERSION)', panel)
@@ -51,8 +53,14 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn("end_time=call.data.get", service)
         self.assertIn('this._dateRange.start', settings)
         self.assertIn('this._dateRange.end', settings)
-        self.assertIn('args.start_time=this._dateRange.start', gas)
-        self.assertIn('args.end_time=this._dateRange.end', gas)
+        self.assertIn('start_time:this._dateRange.start', gas)
+        self.assertIn('end_time:this._dateRange.end', gas)
+        for source in (settings, gas):
+            self.assertIn('tado-x-date-range-picker', source)
+            self.assertIn('date-range-changed', source)
+            self.assertNotIn('this._period', source)
+            self.assertNotIn('XH_PERIODS', source)
+        self.assertIn('/tado/x-date-range-picker.js', (TADO / '__init__.py').read_text())
 
     def test_only_one_vaillant_option_not_advanced_tado_switches(self):
         flow = (TADO / "config_flow.py").read_text()
