@@ -1,6 +1,18 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.17 — managed Heating panel cache busting
+
+The automatically installed `tado X Heating` sidebar panel now uses a
+manifest-versioned module URL so new HACS releases refresh its frontend
+JavaScript automatically after a Home Assistant restart / page reload.
+`frontend` and `http` are explicit integration dependencies. No
+dashboard YAML, frontend Resources registration, automations or helpers
+have to be copied again. The original user-created `Heating` dashboard
+remains unchanged.
+
+
+
 ## v2026.11.16 — self-updating Heating panel (no YAML maintenance)
 
 The integration automatically installs a **tado X Heating** sidebar panel
