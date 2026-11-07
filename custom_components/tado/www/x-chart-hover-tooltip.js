@@ -10,7 +10,8 @@ export function attachRecorderChartTooltip(container,svg,series,options){
   const {start,end,width,left,right,top,bottom,yFor,unit="",period="hour"}=options;
   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||!width||
      typeof yFor!=="function")return;
-  const groups=series.map(s=>({
+  const groups=series.map((s,index)=>({
+    track:index,
     label:s.label,color:s.color,unit:s.unit??unit,
     points:(s.points||[]).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)&&
       p.x>=start&&p.x<=end).slice().sort((a,b)=>a.x-b.x)
@@ -84,7 +85,7 @@ export function attachRecorderChartTooltip(container,svg,series,options){
       markers[i].setAttribute("visibility",valid?"visible":"hidden");
       if(valid){
         markers[i].setAttribute("cx",xFor(p.x));
-        markers[i].setAttribute("cy",yFor(p.y,i));
+        markers[i].setAttribute("cy",yFor(p.y,g.track));
       }
       const row=document.createElement("div");
       row.style.cssText="display:flex;align-items:center;gap:7px;white-space:nowrap";
