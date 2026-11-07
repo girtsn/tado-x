@@ -95,7 +95,7 @@ class AllocationTests(unittest.TestCase):
         result=asyncio.run(self.run_case(self.snapshots(room2_mean=None)))
         self.assertEqual(result["allocated_kwh"],0)
         self.assertEqual(result["unallocated_kwh"],2)
-        by_name={meta["statistic_id"]:rows[0].state
+        by_name={meta["statistic_id"]:rows[0]["state"]
                  for meta,rows in self.writes}
         self.assertAlmostEqual(by_name[allocation._stat_id(self.main,"unallocated")],2)
 
