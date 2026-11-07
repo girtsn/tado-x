@@ -1,12 +1,13 @@
+const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
 /* tado X + Vaillant hourly gas-energy allocation dashboard card.
  * Entirely local Recorder reads; no new tado/Vaillant network polls.
  */
 class TadoXHeatingEnergyCard extends HTMLElement {
   constructor(){
     super();this.attachShadow({mode:"open"});
-    this._hass=null;this._cfg={};this._loaded=false;this._period="month";
+    this._hass=null;this._cfg={};this._loaded=false;
     this._busy=false;this._data=null;this._message="";
-    this._dateRange=null;this._requestId=0;
+    this._dateRange=xhPresetRange("week");this._requestId=0;
   }
   setConfig(config){this._cfg=config||{};this._render();}
   set dateRange(range){
@@ -33,11 +34,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     const request=++this._requestId;
     this._busy=true;this._render();
     try{
-      const args={period:this._period};
-      if(this._dateRange){
-        args.start_time=this._dateRange.start;
-        args.end_time=this._dateRange.end;
-      }
+      const args={start_time:this._dateRange.start,end_time:this._dateRange.end};
       const data=await this._call("x_heating_allocation_history",args);
       if(request===this._requestId){this._data=data;this._message="";}
     }catch(e){if(request===this._requestId)
@@ -90,12 +87,13 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     `;
     root.append(css);const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Estimated gas heating by room"));
-    const actions=this._el("div",null,"actions");
     if(!this._cfg.shared_date_range){
-      for(const [key,label] of [["day","24 hours"],["week","Week"],["month","Month"],["year","Year"],["3years","3 years"]]){
-        actions.append(this._button(label,()=>{this._period=key;this._reload();},this._period===key));
-      }
+      const picker=this._el("tado-x-date-range-picker");
+      picker.range=this._dateRange;
+      picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
+      card.append(picker);
     }
+    const actions=this._el("div",null,"actions");
     actions.append(this._button("Refresh",()=>this._reload()));
     actions.append(this._button("Update estimates",()=>this._compute()));
     card.append(actions);
