@@ -1,4 +1,4 @@
-name: Publish tado X v2026.11.21
+name: Publish validated tado X release
 
 on:
   workflow_run:
@@ -27,15 +27,20 @@ jobs:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          VERSION=$(python -c "import json; print(json.load(open('custom_components/tado/manifest.json'))['version'])")
-          if [[ "$VERSION" != "2026.11.21" ]]; then
+          current_sha=$(git ls-remote origin refs/heads/master | cut -f1)
+          if [[ "$VALIDATED_SHA" != "$current_sha" ]]; then
+            echo "Skipping stale validated commit $VALIDATED_SHA; master is $current_sha"
             exit 0
           fi
-          if gh release view v2026.11.21 >/dev/null 2>&1; then
+          VERSION=$(python -c "import json; print(json.load(open('custom_components/tado/manifest.json'))['version'])")
+          if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{1,2}$ ]]; then
+            exit 0
+          fi
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
             echo "Release already exists"
             exit 0
           fi
-          gh release create v2026.11.21 \
+          gh release create "v$VERSION" \
             --target "$VALIDATED_SHA" \
-            --title "tado X v2026.11.21 — resilient sidebar frontend module loading" \
-            --notes-file RELEASE_NOTES_2026.11.21.md
+            --title "tado X v$VERSION — self-updating frontend loader" \
+            --notes-file "RELEASE_NOTES_$VERSION.md"

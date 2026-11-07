@@ -1,3 +1,4 @@
+const xhTag=name=>name+"-v"+(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
 const XH_CARD_ASSET_VERSION=encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev");
 const {xhPresetRange}=await import("./x-date-range-picker.js?v="+XH_CARD_ASSET_VERSION);
 await import("./x-connectivity-status.js?v="+XH_CARD_ASSET_VERSION);
@@ -396,7 +397,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Heating flow and hot water"));
     if(!this._cfg.shared_connection_status && this._hass){
-      const health=this._el("tado-x-connectivity-status");
+      const health=this._el(xhTag("tado-x-connectivity-status"));
       health.hass=this._hass;
       card.append(health);
     }
@@ -476,7 +477,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       this._state(target.control,"number"),"°C","Target, not measured tank temperature"));
     card.append(dhw);
     if(!this._cfg.shared_date_range){
-      const picker=this._el("tado-x-date-range-picker");
+      const picker=this._el(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
       picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
       card.append(picker);
@@ -493,6 +494,13 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     root.append(card);
   }
 }
+// Managed dashboard uses release-scoped component tags; stable names remain
+// available to existing user-authored Lovelace cards.
+const XH_COMPONENT_VERSION=(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
+const XH_COMPONENT_TAG="tado-x-settings-history-card-v"+XH_COMPONENT_VERSION;
+if(!customElements.get(XH_COMPONENT_TAG))
+  customElements.define(XH_COMPONENT_TAG,class extends TadoXSettingsHistoryCard {});
+
 if(!customElements.get("tado-x-settings-history-card")) customElements.define("tado-x-settings-history-card",TadoXSettingsHistoryCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-settings-history-card",

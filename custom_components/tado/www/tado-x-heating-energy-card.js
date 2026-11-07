@@ -1,3 +1,4 @@
+const xhTag=name=>name+"-v"+(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
 const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
 /* tado X + Vaillant hourly gas-energy allocation dashboard card.
  * Entirely local Recorder reads; no new tado/Vaillant network polls.
@@ -88,7 +89,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     root.append(css);const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Estimated gas heating by room"));
     if(!this._cfg.shared_date_range){
-      const picker=this._el("tado-x-date-range-picker");
+      const picker=this._el(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
       picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
       card.append(picker);
@@ -143,6 +144,13 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     root.append(card);
   }
 }
+// Managed dashboard uses release-scoped component tags; stable names remain
+// available to existing user-authored Lovelace cards.
+const XH_COMPONENT_VERSION=(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
+const XH_COMPONENT_TAG="tado-x-heating-energy-card-v"+XH_COMPONENT_VERSION;
+if(!customElements.get(XH_COMPONENT_TAG))
+  customElements.define(XH_COMPONENT_TAG,class extends TadoXHeatingEnergyCard {});
+
 if(!customElements.get("tado-x-heating-energy-card")) customElements.define("tado-x-heating-energy-card",TadoXHeatingEnergyCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-heating-energy-card",

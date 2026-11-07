@@ -89,6 +89,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         StaticPathConfig("/tado/x-managed-panel.js",
                          str(folder / "tado-x-managed-panel.js"),
                          cache_headers=False),
+        # Keep existing unversioned Lovelace resources working, while the
+        # managed sidebar loads release-specific asset URLs.
+        StaticPathConfig("/tado/x-heating-loader.js",
+                         str(folder / "tado-x-heating-loader.js"),
+                         cache_headers=False),
+        StaticPathConfig("/tado/manifest.json",
+                         str(Path(__file__).parent / "manifest.json"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-managed-panel.js",
+                         str(folder / "tado-x-managed-panel.js"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-date-range-picker.js",
+                         str(folder / "tado-x-date-range-picker.js"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-connectivity-status.js",
+                         str(folder / "tado-x-connectivity-status.js"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-settings-history-card.js",
+                         str(folder / "tado-x-settings-history-card.js"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-schedule-card.js",
+                         str(folder / "tado-x-schedule-card.js"),
+                         cache_headers=False),
+        StaticPathConfig(f"/tado/assets/{INTEGRATION_VERSION}/x-heating-energy-card.js",
+                         str(folder / "tado-x-heating-energy-card.js"),
+                         cache_headers=False),
     ])
     return True
 
@@ -176,10 +202,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             await panel_custom.async_register_panel(
                 hass,
                 frontend_url_path="tado-x-heating",
-                webcomponent_name="tado-x-managed-heating-panel",
+                webcomponent_name="tado-x-heating-loader-panel",
                 sidebar_title="tado X Heating",
                 sidebar_icon="mdi:gas-burner",
-                module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}",
+                module_url="/tado/x-heating-loader.js",
                 config={
                     "config_entry": entry.entry_id,
                     "home_id": str(coordinator.home_id),

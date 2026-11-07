@@ -7,6 +7,9 @@
  * Versioning only the entry module leaves its static imports cached.
  */
 const XH_ASSET_VERSION=new URL(import.meta.url).searchParams.get("v")||"dev";
+const XH_SCOPED_VERSION=(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
+const xhTag=name=>name+"-v"+XH_SCOPED_VERSION;
+
 // Register the panel synchronously: asynchronous assets must never blank the sidebar.
 let xhPresetRange=null;
 
@@ -49,22 +52,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   set panel(value){
     const oldId=this._panel?.config?.config_entry;
-    const oldVersion=this._panel?.config?.integration_version;
     this._panel=value;
-    // When the HA frontend delivers a newly registered panel after a restart,
-    // reload once so the new manifest-versioned JS is loaded automatically.
-    if(oldVersion && value?.config?.integration_version &&
-       oldVersion!==value.config.integration_version){
-      // Reload only once per installed version, not on each HA panel refresh.
-      const key="tado-x-panel-reload-"+value.config.integration_version;
-      try{
-        if(window.sessionStorage.getItem(key)!=="1"){
-          window.sessionStorage.setItem(key,"1");
-          window.location.reload();return;
-        }
-      }catch(_err){/* Avoid a loop if session storage is restricted. */}
-      this._assetsError="Heating panel updated. Reopen this tab if the old panel persists.";
-    }
+    // Versioned loader replaces the child component; no full-page reload.
     if(this._hass && oldId!==value?.config?.config_entry)this._render();
   }
   set narrow(value){this._narrow=Boolean(value);}
@@ -147,7 +136,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     return el;
   }
   _card(type,title){
-    const el=document.createElement(type);
+    const el=document.createElement(xhTag(type));
     el.setConfig({title,config_entry:this._panel?.config?.config_entry,
       shared_date_range:this._tab==="overview",
       shared_connection_status:true});
@@ -210,13 +199,13 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       tabs.append(button);
     }
     shell.append(tabs);
-    this._connectionStatus=this._element("tado-x-connectivity-status");
+    this._connectionStatus=this._element(xhTag("tado-x-connectivity-status"));
     this._connectionStatus.homeId=this._panel?.config?.home_id;
     this._connectionStatus.hass=this._hass;
     shell.append(this._connectionStatus);
 
     if(this._tab==="overview"){
-      const picker=this._element("tado-x-date-range-picker");
+      const picker=this._element(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
       picker.addEventListener("date-range-changed",event=>{
         this._dateRange=event.detail;
@@ -268,7 +257,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     root.append(shell);
   }
 }
-if(!customElements.get("tado-x-managed-heating-panel")){
-  customElements.define("tado-x-managed-heating-panel",
-    TadoXManagedHeatingPanel);
-}
+if(!customElements.get("tado-x-managed-heating-panel"))
+  customElements.define("tado-x-managed-heating-panel",TadoXManagedHeatingPanel);
+if(!customElements.get(xhTag("tado-x-managed-heating-panel")))
+  customElements.define(xhTag("tado-x-managed-heating-panel"),
+    class extends TadoXManagedHeatingPanel {});
