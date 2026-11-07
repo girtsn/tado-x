@@ -205,7 +205,31 @@ class HeatingModeManager:
             ) from adapt_error
         return response, adapted
 
+    def _queue_room_readback(self):
+        # The coordinator reads actual room/overlay state 3 seconds after an
+        # explicit write or the scheduled recovery. During unit tests or a
+        # failed/unloaded coordinator the method may be absent.
+        if self._closed:
+            return
+        schedule = getattr(self.coordinator, "schedule_post_action_room_refresh", None)
+        if callable(schedule):
+            schedule()
+
+    async def async_action(self, action: str) -> dict:
+        try:
+            return await self._async_action_impl(action)
+        finally:
+            # Even if tado times out, it might have applied the command.
+            # Readback confirms the room state rather than assuming success.
+            self._queue_room_readback()
+
     async def async_recover(self) -> dict:
+        try:
+            return await self._async_recover_impl()
+        finally:
+            self._queue_room_readback()
+
+    async def _async_recover_impl(self) -> dict:
         """Recover a previously requested Top Boost, retrying safely."""
         async with self._lock:
             if self._closed or self._pending_kind is None:
@@ -246,7 +270,7 @@ class HeatingModeManager:
                 self._last_error = str(err)
             return self.status()
 
-    async def async_action(self, action: str) -> dict:
+    async def _async_action_impl(self, action: str) -> dict:
         """Execute user actions with persisted recovery for BOTH boost modes.
 
         'boost' is a backward-compatible alias of 'eco_boost'.
