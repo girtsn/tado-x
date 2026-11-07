@@ -34,6 +34,8 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn('new URL(import.meta.url)', panel)
         self.assertIn('encodeURIComponent(XH_ASSET_VERSION)', panel)
         self.assertIn('sidebar_icon="mdi:gas-burner"', backend)
+        self.assertIn('"integration_version": INTEGRATION_VERSION', backend)
+        self.assertIn("oldVersion!==value.config.integration_version", panel)
         self.assertIn('cache_headers=False', backend)
 
 
