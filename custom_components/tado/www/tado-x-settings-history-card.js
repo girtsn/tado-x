@@ -22,7 +22,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     super();this.attachShadow({mode:"open"});this._cfg={};
     this._hass=null;this._once=false;this._period="week";
     this._series={};this._busy=false;this._message="";
-    this._hidden=new Set();
+    this._hidden=new Set();this._actionBusy=false;this._actionMessage="";
   }
   setConfig(cfg){this._cfg=cfg||{};this._render();}
   set hass(hass){
@@ -246,6 +246,44 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     return wrap;
   }
 
+
+  async _quickAction(action){
+    const options={
+      off:{
+        prompt:"Turn heating OFF in all rooms? Frost protection remains active until you resume schedules or adjust rooms manually.",
+        label:"Heating Off"
+      },
+      resume:{
+        prompt:"Resume heating schedules in ALL rooms and cancel any manual overrides?",
+        label:"Resume schedules"
+      },
+      boost:{
+        prompt:"Boost heating to the maximum setpoint in ALL rooms for 30 minutes? This temporarily overrides their schedules.",
+        label:"Boost heating"
+      }
+    };
+    const selected=options[action];
+    if(!selected||this._actionBusy||!this._hass)return;
+    if(!window.confirm(selected.prompt))return;
+    this._actionBusy=true;this._actionMessage="Sending "+selected.label+"…";
+    this._render();
+    try{
+      const answer=await this._hass.callWS({
+        type:"call_service",
+        domain:"tado",
+        service:"x_heating_quick_action",
+        service_data:{action},
+        return_response:true
+      });
+      if(answer?.response?.accepted===false)
+        throw new Error("tado did not accept the action");
+      this._actionMessage=selected.label+" accepted by tado. The room states will update on the next normal poll. Flow adaptation and domestic hot water were not changed by this action.";
+    }catch(err){
+      this._actionMessage=selected.label+" failed: "+(err?.message||err);
+    }finally{
+      this._actionBusy=false;this._render();
+    }
+  }
   _render(){
     const root=this.shadowRoot;root.replaceChildren();
     const style=this._el("style");
@@ -273,6 +311,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       ".legend-item.selected{opacity:1;background:var(--secondary-background-color,#eee)}",
       ".legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0}",
       ".note{font-size:12px;color:var(--secondary-text-color,#777);line-height:1.5;margin:8px 2px}",
+      ".quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:9px 0}",
+      ".quick-action{font-size:12px;font-weight:600;padding:12px 4px;line-height:1.25}",
+      ".off-action{border-color:var(--error-color,#b73830)}",
+      ".resume-action{border-color:var(--success-color,#22936c)}",
+      ".boost-action{border-color:var(--warning-color,#e59c28)}",
       ".message{padding:8px;background:var(--secondary-background-color,#eee);border-radius:6px;font-size:13px}"
     ].join("\n");
     root.append(style);
@@ -296,6 +339,21 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     flow.append(this._tile("Outside temperature",
       this._outdoorId(),"°C","Weather estimate or selected sensor"));
     card.append(flow);
+    card.append(this._el("div","Whole-home heating controls","section-head"));
+    const actions=this._el("div",null,"quick-actions");
+    for(const [label,action,klass] of [
+      ["Heating Off","off","off-action"],
+      ["Resume Schedules","resume","resume-action"],
+      ["Boost 30 min","boost","boost-action"]
+    ]){
+      const b=this._button(label,()=>this._quickAction(action));
+      b.className="quick-action "+klass;
+      b.disabled=this._actionBusy;
+      actions.append(b);
+    }
+    card.append(actions);
+    card.append(this._el("p","These affect all ten heating rooms only. Boost sets rooms to their maximum temperatures for 30 minutes; it does not intentionally disable automatic flow adaptation. Heating Off keeps frost protection active. Every action asks for confirmation.","note"));
+    if(this._actionMessage)card.append(this._el("p",this._actionMessage,"message"));
     card.append(this._el("div","Domestic hot water","section-head"));
     const dhw=this._el("div",null,"controls");
     const target=XH_SOURCES.find(x=>x.id==="dhw");
