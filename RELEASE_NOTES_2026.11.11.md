@@ -1,6 +1,41 @@
-# tado X v2026.11.11 — clarify consumption dashboard calculation
+# tado X v2026.11.11 — investigate unallocated heating gas
 
-Maintenance release for the custom Lovelace heating consumption card.
+## Read-only diagnostic (main improvement)
+
+A new `tado.x_diagnose_unallocated_heating` action investigates gas input
+assigned to Unallocated by the Vaillant/tado allocation model.
+
+In Home Assistant **Developer Tools → Actions**, run:
+
+```yaml
+action: tado.x_diagnose_unallocated_heating
+data:
+  days: 35
+  limit: 30
+response_variable: diagnosis
+```
+
+The response separates **two causes** which previously looked identical:
+
+- `missing_or_invalid_room_demand`: one or more room statistics missing
+  or outside 0–100%; the model conservatively assigns the **entire hour's
+  gas input** to Unallocated, even if another room was heating.
+- `all_rooms_zero_demand`: all ten rooms had available 0% mean demand
+  in that hour, yet Vaillant reports positive heating-gas input.
+
+It reports totals and counts per cause, missing sensor names, daily
+unallocated amounts, the 30 highest-gas unallocated hours with Brussels
+local timestamps, other rooms with active demand, and whether a room had
+demand during the adjacent hours (a clue for delayed/overlapping boiler
+activity, not proof).
+
+This diagnostic uses existing local Home Assistant Recorder hourly data,
+**makes no cloud calls and writes no statistics or device settings**.
+Review results before changing any formula or past estimate.
+
+## Dashboard wording fix
+
+Maintenance release for diagnosing gas allocation and correcting the custom Lovelace consumption card.
 
 - Corrects an **obsolete footer** in `tado-x-heating-energy-card.js`
   that still said room capacity defaults to 1 kW per radiator.
