@@ -1,6 +1,48 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.14 — live tado X schedule-mode detection
+
+The **Heating home mode** sensor and Overview indicator now use the ten actual
+tado X room states, not only the last button pressed in Home Assistant:
+
+- **Following Schedules** when all ten rooms report Smart Schedule
+- **Manual Override (N)** when one or more rooms have an active manual setting
+- **Heating Off** when all ten rooms report manual Off
+- **Room state incomplete** if any room's status is unavailable
+- **Eco / Top Boost** with the stored 30-minute recovery countdown when a
+  Home Assistant boost is pending and the room states confirm manual control.
+
+The latest reported schedule state can differ from the last action requested
+via Home Assistant if someone changes a radiator or the tado app. The
+integration uses `PyTado.TadoXZone.overlay_active` which reflects
+`manualControlTermination`, rather than comparing temperatures to scheduled
+setpoints.
+
+A separate **Heating schedule control** sensor is available for each tado
+room, showing **Smart Schedule / Manual Override / Unknown**. These are
+room-level indicators: the two radiator valves in the attic bedroom share a
+single room control state. It uses only the normal 5-minute room poll.
+
+A new read-only Developer Tools action reports everything:
+
+```yaml
+action: tado.x_room_schedule_status
+response_variable: room_schedules
+```
+
+**Resume Schedules** is greyed out when all rooms follow schedules, adaptive
+flow is enabled and there is no pending boost. A manual room override, a
+disabled adaptation setting or an active saved boost makes it available.
+An unknown room is not silently assumed to be manually controlled.
+
+Register the updated history/Overview module at
+`/tado/x-settings-history-card.js?v=2026.11.14`.
+The existing Heating dashboard YAML remains compatible; this release
+does not change any device setting during installation.
+
+
+
 ## v2026.11.13 — persisted Eco Boost, Top Boost, and current HA heating mode
 
 New whole-home heating choices:
