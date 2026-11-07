@@ -17,7 +17,7 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         panel = (TADO / "www" / "tado-x-managed-panel.js").read_text()
         self.assertIn('frontend_url_path="tado-x-heating"', backend)
         self.assertIn('webcomponent_name="tado-x-managed-heating-panel"', backend)
-        self.assertIn('module_url="/tado/x-managed-panel.js"', backend)
+        self.assertIn('module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}"', backend)
         for component in (
             "tado-x-settings-history-card",
             "tado-x-schedule-card",

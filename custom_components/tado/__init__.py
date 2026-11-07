@@ -40,6 +40,7 @@ from .services import setup_services
 from .tadox_ext import TadoXSettingsCoordinator
 from .heating_modes import HeatingModeManager
 from .heat_allocation import allocate_recent
+from .manifest_version import INTEGRATION_VERSION
 from .x_features import energy_enabled, restore_used_legacy_energy_option
 
 PLATFORMS = [
@@ -172,7 +173,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 webcomponent_name="tado-x-managed-heating-panel",
                 sidebar_title="tado X Heating",
                 sidebar_icon="mdi:home-thermometer",
-                module_url="/tado/x-managed-panel.js",
+                module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}",
                 config={
                     "config_entry": entry.entry_id,
                     "home_id": str(coordinator.home_id),
