@@ -423,3 +423,19 @@ x_heating_mode_status:
       selector:
         config_entry:
           integration: tado
+
+x_room_schedule_status:
+  name: Show tado X room schedules and manual overrides
+  description: >-
+    Read only. Uses the cached tado X room states polled by the existing
+    integration. Reports for every room whether Smart Schedule is active,
+    whether manual control is overriding it (including manual Off),
+    the override termination type and the inferred current home heating
+    mode. One room can contain multiple radiator valves. This does not
+    call the cloud or modify a heating setting.
+  fields:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado

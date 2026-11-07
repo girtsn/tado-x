@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import TadoDataUpdateCoordinator
 from .entity import TadoHomeEntity, TadoZoneEntity
+from .room_override import room_override_report, observed_home_mode, _read_zone
 from .x_entities import (
     TadoXAdaptedFlowSensor,
     TadoXSettingHistorySensor,
@@ -260,7 +261,51 @@ async def async_setup_entry(
         ])
     if tado.is_x and getattr(tado, "x_heating_modes", None):
         entities.append(TadoXHeatingHomeModeSensor(tado))
+        entities.extend([
+            TadoXRoomScheduleControlSensor(tado, zone["id"], zone["name"])
+            for zone in tado.zones
+        ])
     async_add_entities(entities, True)
+
+
+class TadoXRoomScheduleControlSensor(TadoZoneEntity, SensorEntity):
+    """Per-room Smart Schedule / Manual Override, from existing tado poll."""
+
+    _attr_name = "Heating schedule control"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator, zone_id, zone_name):
+        super().__init__(zone_name, coordinator.home_id, zone_id, coordinator)
+        self._attr_unique_id = (
+            f"{coordinator.home_id}_x_room_{zone_id}_schedule_control"
+        )
+
+    @property
+    def _status(self):
+        states = self.coordinator.data.get("zone") or {}
+        zone = states.get(self.zone_id, states.get(str(self.zone_id)))
+        return _read_zone(zone)
+
+    @property
+    def native_value(self):
+        state, _ = self._status
+        return {
+            "smart_schedule": "Smart Schedule",
+            "manual_override": "Manual Override",
+            "unknown": "Unknown",
+        }[state]
+
+    @property
+    def extra_state_attributes(self):
+        state, termination = self._status
+        return {
+            "room_id": self.zone_id,
+            "manual_override_active": True if state == "manual_override"
+                else False if state == "smart_schedule" else None,
+            "override_termination": termination,
+            "status_source": "tado room-level schedule control",
+            "not_per_individual_radiator_valve": True,
+        }
 
 
 class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
@@ -278,16 +323,64 @@ class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.home_id}_x_heating_home_mode"
 
     @property
+    def _report(self):
+        return room_override_report(self.coordinator)
+
+    @property
     def native_value(self):
         manager = getattr(self.coordinator, "x_heating_modes", None)
-        return manager.status()["mode_label"] if manager else "Unknown"
+        saved = manager.status() if manager else None
+        live = observed_home_mode(self._report, saved)
+        return live["effective_mode_label"]
 
     @property
     def extra_state_attributes(self):
         manager = getattr(self.coordinator, "x_heating_modes", None)
-        return manager.status() if manager else {
-            "mode": "unknown", "mode_confirmed_by_device": False
+        saved = manager.status() if manager else {}
+        report = self._report
+        live = observed_home_mode(report, saved)
+        settings = getattr(self.coordinator, "x_settings", None)
+        flow = ((getattr(settings, "data", None) or {}).get("flow") or {})
+        adap = flow.get("autoAdaptation") if isinstance(flow, dict) else None
+        enabled = adap.get("enabled") if isinstance(adap, dict) else None
+        # Enable Resume when a room is *known* to be manually overridden
+        # OR when automatic adaptation is known disabled. When sensor data is
+        # unknown we don't assume interruption or declare normal operation.
+        resume_needed = (
+            report["manual_override_count"] > 0
+            or enabled is False
+            or live["boost_timer_active"]
+        )
+        status = {
+            **saved,
+            **live,
+            "manual_override_count": report["manual_override_count"],
+            "manual_override_rooms": report["manual_override_rooms"],
+            "room_control_states": report["rooms"],
+            "manual_off_rooms": report["manual_off_rooms"],
+            "rooms_following_schedule": report["schedule_count"],
+            "rooms_unknown": report["unknown_count"],
+            "unknown_room_names": report["unknown_rooms"],
+            "all_following_schedules": report["all_following_schedules"],
+            "adaptive_flow_enabled": enabled if type(enabled) is bool else None,
+            "resume_needed": resume_needed,
+            "resume_reason": (
+                "manual_room_override" if report["manual_override_count"]
+                else "active_boost" if live["boost_timer_active"]
+                else "adaptation_disabled" if enabled is False
+                else "room_status_unknown" if report["unknown_count"]
+                else "adaptation_unknown" if enabled is None
+                else "all_scheduled"
+            ),
+            "room_status_is_live_cache": True,
+            "mode_source": "tado_room_states_with_home_assistant_boost_timer",
+            "mode_confirmed_by_device": (
+                report["total_rooms"] > 0
+                and report["unknown_count"] == 0
+                and not live["boost_timer_active"]
+            ),
         }
+        return status
 
 
 class TadoHomeSensor(TadoHomeEntity, SensorEntity):

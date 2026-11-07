@@ -11,6 +11,7 @@ from homeassistant.helpers import selector
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import allocate_recent, allocation_history, diagnose_unallocated
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
+from .room_override import room_override_report, observed_home_mode
 
 from .const import (
     ATTR_MESSAGE,
@@ -275,6 +276,23 @@ def setup_services(hass: HomeAssistant) -> None:
                 vol.Coerce(int), vol.Range(min=1, max=100)
             ),
         }), supports_response=SupportsResponse.ONLY,
+    )
+
+    async def x_room_schedule_status(call: ServiceCall) -> dict:
+        """Live-cache view of room-level manual overrides versus schedules."""
+        main = get_x_coordinator(call)
+        report = room_override_report(main)
+        manager = getattr(main, "x_heating_modes", None)
+        report["home_mode"] = observed_home_mode(
+            report, manager.status() if manager else None
+        )
+        report["read_only"] = True
+        report["no_additional_cloud_requests"] = True
+        return report
+
+    hass.services.async_register(
+        DOMAIN, "x_room_schedule_status", x_room_schedule_status,
+        schema=vol.Schema(home), supports_response=SupportsResponse.ONLY,
     )
 
     async def x_radiator_capacities(call: ServiceCall) -> dict:
