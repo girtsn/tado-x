@@ -233,7 +233,15 @@ class TadoXHeatingEnergyCard extends HTMLElement {
       :host{display:block;font-family:var(--primary-font-family,Roboto,Arial,sans-serif);color:var(--primary-text-color)}
       ha-card{display:block;background:var(--card-background-color,var(--ha-card-background,#fff));border:1px solid var(--divider-color,#ddd);border-radius:12px;padding:16px}
       h2{font-size:19px;font-weight:500;margin:0 0 12px}
-      .actions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 16px}
+      .actions{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 12px}
+      .calendar-nav{border:1px solid var(--divider-color,#ddd);border-radius:10px;padding:9px;margin:8px 0 14px}
+      .date-navigation{display:flex;gap:7px;align-items:center;justify-content:space-between}
+      .date-navigation button{font-size:23px;line-height:1.1;min-width:38px}
+      .period-label{font-size:14px;text-align:center;overflow-wrap:anywhere;line-height:1.3}
+      .date-pickers{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;margin-top:10px}
+      .date-pickers label{display:flex;gap:3px;flex-direction:column;font-size:12px;color:var(--secondary-text-color,#777)}
+      .date-pickers input{font:inherit;font-size:14px;min-width:140px;max-width:100%;padding:7px;border:1px solid var(--divider-color,#aaa);border-radius:6px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#000)}
+      .date-pickers button{font-size:13px}
       button{background:var(--card-background-color,#fff);color:inherit;padding:7px 10px;border:1px solid var(--divider-color,#aaa);border-radius:6px;cursor:pointer}
       button.active{background:var(--primary-color,#1976d2);border-color:var(--primary-color,#1976d2);color:white}
       button:disabled{opacity:.5;cursor:not-allowed}
@@ -254,12 +262,15 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     root.append(css);const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Estimated gas heating by room"));
     const actions=this._el("div",null,"actions");
-    for(const [key,label] of [["day","24 hours"],["week","Week"],["month","Month"],["year","Year"],["3years","3 years"]]){
-      actions.append(this._button(label,()=>{this._period=key;this._reload();},this._period===key));
+    for(const [key,label] of [["day","Day"],["week","Week"],["month","Month"],["year","Year"],["3years","3 years"],["custom","Custom"]]){
+      actions.append(this._button(label,()=>this._changePeriod(key),this._period===key));
     }
-    actions.append(this._button("Refresh",()=>this._reload()));
-    actions.append(this._button("Update estimates",()=>this._compute()));
     card.append(actions);
+    card.append(this._dateNavigation());
+    const commands=this._el("div",null,"actions");
+    commands.append(this._button("Refresh",()=>this._reload()));
+    commands.append(this._button("Update estimates",()=>this._compute()));
+    card.append(commands);
     if(this._data?.series?.length){
       const map=new Map(this._data.rooms.map(name=>[name,0]));
       const periods=this._data.series;
@@ -296,13 +307,13 @@ class TadoXHeatingEnergyCard extends HTMLElement {
         el.title=row.period+": "+this._fmt(vals[index])+" kWh";
         timeline.append(el);
       });card.append(timeline);
-      card.append(this._el("p",periods[0].period+" to "+periods[periods.length-1].period,"muted"));
+      card.append(this._el("p","Recorded data shown: "+periods[0].period+" to "+periods[periods.length-1].period,"muted"));
     }else{
       card.append(this._el("p","No allocation history is available yet. The hourly job needs Vaillant Gas Heating statistics and Recorder history for all ten tado room demand sensors.","notice"));
     }
     if(this._message)card.append(this._el("p",this._message,"notice"));
     if(this._busy)card.append(this._el("p","Updating…","muted"));
-    card.append(this._el("p","Estimated shares of Vaillant heating-gas INPUT, not measured heat delivered to each radiator. Allocation uses actual room heating demand weighted by the installed radiators' EN442 rated output at 75/65/20°C (11 radiators, 10 rooms, total 25.748 kW nominal). This rating is a reference capacity, not actual output at lower water temperatures. Unallocated represents gas input when demand data is missing or no room reports heating demand. Original Vaillant statistics remain unchanged.","muted"));
+    card.append(this._el("p","Estimated shares of Vaillant heating-gas INPUT, not measured heat delivered to each radiator. Allocation uses actual room heating demand weighted by the installed radiators' EN442 rated output at 75/65/20°C (11 radiators, 10 rooms, total 25.748 kW nominal). This rating is a reference capacity, not actual output at lower water temperatures. Unallocated represents gas input when demand data is missing or no room reports heating demand. Original Vaillant statistics remain unchanged. Historic gas data reconstructed from daily Vaillant totals remains provisional for hourly room allocation. Your selected range is saved on this device.","muted"));
     root.append(card);
   }
 }
