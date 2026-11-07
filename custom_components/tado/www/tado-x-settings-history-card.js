@@ -265,18 +265,34 @@ class TadoXSettingsHistoryCard extends HTMLElement {
   _modeStatus(){
     const id=this._state("Heating home mode","sensor");
     const entity=id?this._hass?.states?.[id]:null;
-    if(!entity)return {label:"Unknown",note:"No Home Assistant heating mode sensor found. Install the latest tado X integration and restart."};
+    if(!entity)return {
+      label:"Unknown", note:"Heating home mode sensor unavailable. Restart Home Assistant after updating tado X.",
+      resumeNeeded:null, manual:null
+    };
     const a=entity.attributes||{};
     const ts=a.due_utc?Date.parse(a.due_utc):NaN;
     const seconds=Number.isFinite(ts)?Math.max(0,Math.ceil((ts-Date.now())/1000)):null;
-    const countdown=seconds!==null&&a.kind==="resume_and_adapt"
-      ? seconds>0?" — resumes in "+Math.ceil(seconds/60)+" min":" — restoring schedules"
-      : a.kind==="adapt_only"?" — re-enabling adaptation":"";
+    const boostActive=a.boost_timer_active===true;
+    const countdown=boostActive&&seconds!==null
+      ?seconds>0?" — "+Math.ceil(seconds/60)+" min remaining":" — restoring schedules"
+      :a.kind==="adapt_only"?" — re-enabling adaptation":"";
+    const manual=typeof a.manual_override_count==="number"?a.manual_override_count:null;
+    const following=typeof a.rooms_following_schedule==="number"?a.rooms_following_schedule:null;
+    const unknown=typeof a.rooms_unknown==="number"?a.rooms_unknown:null;
+    const observed=a.observed_mode_label||"Status unavailable";
+    const label=(entity.state||"Unknown")+countdown;
     return {
-      label:(a.mode_label||entity.state)+countdown,
-      mode:a.mode||"unknown",
-      due:a.due_utc||null,
-      note:"Last mode requested via Home Assistant; actions in the tado app or individual room changes may differ.",
+      label, observed,
+      manual, following, unknown,
+      manualRooms:Array.isArray(a.manual_override_rooms)?a.manual_override_rooms:[],
+      unknownRooms:Array.isArray(a.unknown_room_names)?a.unknown_room_names:[],
+      adaptation:a.adaptive_flow_enabled,
+      // Explicit true/false prevents unknown observations from being taken
+      // as proof that a manual override was detected.
+      resumeNeeded:typeof a.resume_needed==="boolean"?a.resume_needed:null,
+      note:boostActive
+        ?"Boost initiated through Home Assistant; room override status is reported by tado."
+        :"Schedule/override status comes from tado room polling (normally every 5 minutes).",
       recoveryError:a.last_recovery_error||null
     };
   }
@@ -383,9 +399,29 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     card.append(this._el("div","Whole-home heating controls","section-head"));
     const mode=this._modeStatus();
     const indicator=this._el("div",null,"mode-indicator");
-    indicator.append(this._el("span","Last HA heating mode","mode-caption"));
+    indicator.append(this._el("span","Current heating mode","mode-caption"));
     indicator.append(this._el("strong",mode.label,"mode-value"));
     indicator.append(this._el("small",mode.note,"mode-detail"));
+    if(mode.manual!==null){
+      indicator.append(this._el("div",
+        "Rooms: "+(mode.following??"?")+" following schedules, "+mode.manual+
+        " manual override"+(mode.manual===1?"":"s")+
+        (mode.unknown?" · "+mode.unknown+" unknown":""),
+        "mode-detail"));
+      if(mode.observed!==mode.label&&!mode.label.startsWith(mode.observed)){
+        indicator.append(this._el("small",
+          "tado room status: "+mode.observed,"mode-detail"));
+      }
+      if(mode.manualRooms.length)
+        indicator.append(this._el("small",
+          "Interrupted: "+mode.manualRooms.join(", "),"mode-detail"));
+      if(mode.unknownRooms.length)
+        indicator.append(this._el("small",
+          "Not confirmed: "+mode.unknownRooms.join(", "),"mode-detail"));
+    }
+    if(mode.adaptation===false)
+      indicator.append(this._el("small",
+        "Automatic flow adaptation is disabled","mode-warning"));
     if(mode.recoveryError)indicator.append(this._el(
       "small","Recovery warning: "+mode.recoveryError,"mode-warning"
     ));
@@ -399,11 +435,15 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     ]){
       const b=this._button(label,()=>this._quickAction(action));
       b.className="quick-action "+klass;
-      b.disabled=this._actionBusy;
+      // Same principle as tado app: Resume is inactive when every room is
+      // following schedule and adaptive flow is known enabled.
+      b.disabled=this._actionBusy || (action==="resume" && mode.resumeNeeded===false);
+      if(action==="resume" && mode.resumeNeeded===false)
+        b.title="All rooms are on Smart Schedule and adaptive flow is enabled";
       actions.append(b);
     }
     card.append(actions);
-    card.append(this._el("p","Eco Boost uses tado's maximum room boost with adaptive flow enabled. Top Boost temporarily disables adaptation. Both persist their 30-minute recovery and restore schedules plus adaptive flow. Heating Off retains frost protection. All actions require confirmation.","note"));
+    card.append(this._el("p","Resume Schedules is enabled when tado reports at least one room manually overridden, or adaptive flow is disabled. Boost timers survive Home Assistant restarts. Room schedule status is refreshed by tado polling and applies to rooms, not individual valves. Every action requires confirmation.","note"));
     if(this._actionMessage)card.append(this._el("p",this._actionMessage,"message"));
     card.append(this._el("div","Domestic hot water","section-head"));
     const dhw=this._el("div",null,"controls");
