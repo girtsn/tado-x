@@ -11,8 +11,6 @@ individual radiator energy. No Vaillant recorder/statistic/source is modified.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from collections import defaultdict
-import asyncio
 import logging
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -25,8 +23,10 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.helpers import entity_registry as er
 from homeassistant.exceptions import HomeAssistantError
 
+from .radiator_inventory import radiator_capacity_report, require_valid_capacities
+
 _LOGGER = logging.getLogger(__name__)
-PREFIX = "tado:x_estimated_gas_heating_"
+PREFIX = "tado:x_radiator_weighted_gas_heating_v2_"
 GAS_PROFILE = ("CONSUMED_PRIMARY_ENERGY", "HEATING")
 KWH_PER_WH = 0.001
 MAX_BACKFILL_DAYS = 35
@@ -37,20 +37,16 @@ def _stat_id(main, zone_id: int | str) -> str:
 
 
 def _capacities(main) -> dict[str, float]:
-    overrides = main.config_entry.options.get("x_capacity_kw", {})
-    result = {}
-    for room in main.zones:
-        room_id = str(room["id"])
-        devices = room.get("devices", [])
-        count = sum(
-            1 for d in devices
-            if isinstance(d, dict)
-            and str(d.get("type", d.get("deviceType", ""))).startswith("VA")
-        )
-        default = float(max(count, 1))  # equal relative radiator capacity
-        stored = overrides.get(room_id)
-        result[room_id] = float(stored) if type(stored) in (int, float) and stored > 0 else default
-    return result
+    """Actual installed radiator EN442 W, grouped per named tado room.
+
+    Never silently fall back to 1kW if a room is unknown or a multi-radiator
+    count disagrees with the physical inventory. An existing manual setting
+    wins over an inferred/nominal inventory value.
+    """
+    return require_valid_capacities(
+        main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+        main.config_entry.options.get("x_radiator_room_mapping", {})
+    )
 
 
 def _gas_statistic(hass) -> str | None:
@@ -128,7 +124,17 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
 
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     start = end - timedelta(days=days)
-    cap = _capacities(main)
+    try:
+        cap = _capacities(main)
+    except HomeAssistantError as err:
+        report = radiator_capacity_report(main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+        main.config_entry.options.get("x_radiator_room_mapping", {}))
+        return {
+            "status": "radiator_capacity_mapping_needs_review",
+            "message": str(err),
+            "rooms": report["rooms"],
+            "no_statistics_modified": True,
+        }
     stat_ids = set(room_sensors.values()) | {source_id}
     output_ids = {_stat_id(main, zid) for zid in room_sensors}
     output_ids.add(_stat_id(main, "unallocated"))
@@ -206,6 +212,8 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
         "allocated_kwh": round(allocated_kwh,3),
         "unallocated_kwh": round(unknown_kwh,3),
         "source": "myPyllant Gas Heating (Wh) + tado heating demand hourly means",
+        "capacity_basis": "EN442 75/65/20 radiator output, room sum for multiple radiators",
+        "capacity_kw": cap,
         "interpretation": "Estimated allocation of gas INPUT, not thermal energy per radiator",
     }
 
@@ -242,6 +250,7 @@ async def allocation_history(hass, main, period: str = "month") -> dict:
         "period": period,
         "unit": "kWh of estimated heating gas input",
         "source": "Vaillant hourly gas heating profile allocated by tado room demand",
+        "capacity_basis": "Installed radiator EN442 75/65/20, v2 separate statistic IDs",
         "rooms": list(zones.values()),
         "series": [{"period":key,**value} for key,value in sorted(timeline.items())],
         "note": "No history exists before the allocation service began recording. This does not measure radiator heat output.",

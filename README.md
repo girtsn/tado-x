@@ -1,5 +1,101 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.9 — real radiator inventory, not one kilowatt per thermostat
+
+This update replaces the earlier nominal **1 kW per tado radiator thermostat**
+default with capacity weights from the installed radiator specifications,
+using catalogue EN442 rated outputs at **75/65/20°C (Delta-T50)**.
+The physical radiator IDs **R01–R11** are NOT tado room IDs **R1–R10**.
+The two radiator thermostats in one tado room correspond to the **attic
+bedroom's R09 and R10**, not physical radiator R02.
+
+| Physical radiator | Floor, room | Series, type, H×L | Nominal output |
+| --- | --- | --- | ---: |
+| R01 | 0fl Living room | Uni.8 T33, 300×3000 mm | 3993 W |
+| R02 | 0fl Entrance hallway | Uni.8 T33, 900×500 mm | 1643 W |
+| R03 | 0fl Kitchen | Uni.8 T33, 500×1000 mm | 2075 W |
+| R04 | 0fl Toilet | Uni.8 SP-08 T21, 900×400 mm | 721 W |
+| R05 | 1fl Yard-side bedroom | Compact 4 T33, 500×1200 mm | 2424 W |
+| R06 | 1fl Street-side bedroom | Compact 4 T33, 500×1200 mm | 2424 W |
+| R07 | 1fl Small bedroom | Compact 4 T22, 500×1000 mm | 1449 W |
+| R08 | 1fl Bathroom | Compact 4 T33, 500×600 mm | 1212 W |
+| R09 | 2fl Attic bedroom, radiator 1 | Uni.8 SP-08 T33, 700×1200 mm | 3269 W |
+| R10 | 2fl Attic bedroom, radiator 2 | Uni.8 SP-08 T33, 700×1200 mm | 3269 W |
+| R11 | 2fl Attic bathroom | Uni.8 SP-08 T33, 700×1200 mm | 3269 W |
+| **Total** | **10 rooms, 11 radiators** | | **25748 W** |
+
+**Resulting attic bedroom room weight:** R09 + R10 = **6.538 kW**.
+R11's **3.269 kW** belongs to the separate attic bathroom.
+
+### Inspect the live room mapping before modifying weights
+
+Run this in **Developer Tools → Actions**:
+
+```yaml
+action: tado.x_radiator_capacity_report
+response_variable: radiator_report
+```
+
+It reports real tado room IDs and names, the physical Rxx radiators proposed
+for each, the nominal EN442 W, detected valve count, any existing HA
+number-entity override and any mismatch. Mapping uses conservative exact
+name aliases; it does **not** assume physical R02 corresponds to tado R2.
+
+If a room is not matched, obtain the real tado room IDs using
+`tado.x_list_rooms`, then explicitly map it. Example (replace **999**
+with the actual tado room ID returned by Home Assistant):
+
+```yaml
+action: tado.x_assign_radiator_room
+data:
+  room_id: 999
+  physical_room: attic_bedroom
+```
+
+Available physical-room groups are:
+`living`, `entrance`, `kitchen`, `toilet`, `yard_bedroom`,
+`street_bedroom`, `small_bedroom`, `bathroom_1fl`,
+`attic_bedroom`, `attic_bathroom`.
+Set `physical_room: auto` to remove a manual assignment.
+A group can only be explicitly assigned once.
+
+Matched rooms immediately show their nominal power on the existing
+**Estimated radiator capacity** `number` entities (precision 0.001 kW =
+1 watt). Existing manually saved number-entity values continue to override
+automatic defaults.
+
+Use the following action to **preview** the values that would be stored
+locally, without making any change:
+
+```yaml
+action: tado.x_apply_radiator_capacities
+data:
+  dry_run: true
+  overwrite_existing: true
+response_variable: planned_wattages
+```
+
+When the mapping and watts are correct, change `dry_run` to `false` to
+persist the rated output for mapped rooms. `overwrite_existing: false`
+(default) preserves any previously set manual wattage; use `true` to
+replace legacy 1 kW manual values with the catalogue output. This updates
+**only Home Assistant's room weights**, not radiator valves, tado schedules,
+boiler setpoints or Vaillant measured statistics.
+
+### Allocation data compatibility
+
+To avoid mixing the original equal-capacity model with the new rated-output
+model, new gas-input estimates are published to separate
+`tado:x_radiator_weighted_gas_heating_v2_*` statistic IDs.
+Old `tado:x_estimated_gas_heating_*` values are **not deleted or rewritten**.
+The custom consumption card now reads the v2 series and will build its own
+history from hours where rated output and room demand are available.
+If rooms cannot be mapped without ambiguity, estimation pauses and the
+capacity report explains why. Don't rely on these allocated kWh for billing:
+the kW ratings are standard-test output, not measured delivered radiator
+heat, and heating-demand % is not physical valve travel.
+
+
 ## New in 2026.11.8 — permanent settings history
 
 The existing editable `number` and `switch` entities are not sufficient to

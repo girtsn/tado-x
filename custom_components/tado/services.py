@@ -10,6 +10,7 @@ from homeassistant.helpers import selector
 
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import allocate_recent, allocation_history
+from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 
 from .const import (
     ATTR_MESSAGE,
@@ -223,4 +224,108 @@ def setup_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({**home, vol.Optional("period", default="month"):
                            vol.In(["day", "week", "month", "year", "3years"])}),
         supports_response=SupportsResponse.ONLY,
+    )
+
+    async def x_radiator_capacities(call: ServiceCall) -> dict:
+        """Show current tado room-to-physical-radiator mapping and rated W."""
+        main = get_x_coordinator(call)
+        return radiator_capacity_report(
+            main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+            main.config_entry.options.get("x_radiator_room_mapping", {}),
+        )
+
+    async def x_apply_radiator_capacities(call: ServiceCall) -> dict:
+        """Persist only safely matched nominal capacities; never write tado."""
+        main = get_x_coordinator(call)
+        report = radiator_capacity_report(
+            main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+            main.config_entry.options.get("x_radiator_room_mapping", {}),
+        )
+        entry = main.config_entry
+        values = dict(entry.options.get("x_capacity_kw", {}))
+        overwrite = call.data.get("overwrite_existing", False)
+        dry_run = call.data.get("dry_run", True)
+        updates = []
+        skipped = []
+        for room in report["rooms"]:
+            if room["status"] != "matched":
+                skipped.append({"room": room["room"], "reason": room["status"]})
+                continue
+            rid = str(room["room_id"])
+            if not overwrite and rid in values:
+                skipped.append({"room": room["room"], "reason": "existing_manual_override_preserved"})
+                continue
+            value = round(float(room["rated_w"]) / 1000, 3)
+            values[rid] = value
+            updates.append({"room": room["room"], "room_id": room["room_id"], "kw": value})
+        if not dry_run and updates:
+            main.hass.config_entries.async_update_entry(
+                entry, options={**entry.options, "x_capacity_kw": values}
+            )
+            main.async_update_listeners()
+        return {
+            "status": "preview_only" if dry_run else "applied_locally",
+            "updated_rooms": updates,
+            "skipped_rooms": skipped,
+            "radiator_heating_settings_changed": False,
+            "boiler_settings_changed": False,
+            "source_statistics_modified": False,
+        }
+
+    hass.services.async_register(
+        DOMAIN, "x_radiator_capacity_report", x_radiator_capacities,
+        schema=vol.Schema(home), supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN, "x_apply_radiator_capacities", x_apply_radiator_capacities,
+        schema=vol.Schema({
+            **home,
+            vol.Optional("dry_run", default=True): bool,
+            vol.Optional("overwrite_existing", default=False): bool,
+        }), supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def x_assign_radiator_room(call: ServiceCall) -> dict:
+        """Bind a named physical-room inventory group to one real tado room ID.
+
+        This changes only Home Assistant's local estimate metadata; it does NOT
+        change tado cloud schedules, devices, radiator valves or boiler flow.
+        """
+        main = get_x_coordinator(call)
+        room_id = str(call.data["room_id"])
+        if room_id not in {str(z["id"]) for z in main.zones}:
+            raise ServiceValidationError("Unknown tado room_id; call tado.x_list_rooms")
+        requested = call.data["physical_room"]
+        if requested != "auto" and requested not in GROUP_PHYSICAL_IDS:
+            raise ServiceValidationError("Unknown physical radiator room")
+        current = dict(main.config_entry.options.get("x_radiator_room_mapping", {}))
+        if requested == "auto":
+            current.pop(room_id, None)
+        else:
+            if any(other_id != room_id and group == requested
+                   for other_id, group in current.items()):
+                raise ServiceValidationError("That radiator room is assigned to another tado room")
+            current[room_id] = requested
+        main.hass.config_entries.async_update_entry(
+            main.config_entry,
+            options={**main.config_entry.options,
+                     "x_radiator_room_mapping": current},
+        )
+        main.async_update_listeners()
+        return {
+            "status": "mapped_locally",
+            "tado_room_id": int(room_id),
+            "physical_room": requested,
+            "radiator_ids": GROUP_PHYSICAL_IDS.get(requested, []),
+            "boiler_settings_changed": False,
+            "tado_settings_changed": False,
+        }
+
+    hass.services.async_register(
+        DOMAIN, "x_assign_radiator_room", x_assign_radiator_room,
+        schema=vol.Schema({
+            **home,
+            vol.Required("room_id"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Required("physical_room"): vol.In(["auto", *GROUP_PHYSICAL_IDS]),
+        }), supports_response=SupportsResponse.OPTIONAL,
     )
