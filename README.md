@@ -22,10 +22,16 @@ automatically recognised and have the option preserved. Other installations
 need not have myPyllant installed and no Vaillant allocation runs unless this
 single option is enabled.
 
-The custom dashboard energy card is an optional resource. Its Vaillant data
-and hardcoded physical inventory are not relevant to other households.
-The included physical radiator data is nevertheless present in this public
-repository; opting out hides the runtime feature, not its source.
+The default [Heating dashboard example](examples/heating_dashboard.yaml)
+includes universal tado X controls and room schedules only, with no Vaillant
+requirement or particular home's radiator inventory.
+
+The optional [Vaillant household dashboard](examples/heating_dashboard_household_vaillant.yaml)
+includes the heating gas-by-room consumption card and EN442 physical radiator
+inventory, and requires the household energy checkbox plus a configured
+myPyllant source. This card remains an optional resource. The included physical
+radiator data is nevertheless present in this public repository; opting out
+hides the runtime feature, not its source.
 
 The built-in dashboard cards have not changed in this release; previous
 registered JavaScript resources still work without cache busting.
