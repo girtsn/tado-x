@@ -152,6 +152,22 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       ?"/tado-x-heating":"/tado-x-heating/schedules");
     this._render();
   }
+  _mobileMenuButton(){
+    // A custom panel owns its header on narrow screens; HA does not supply one.
+    const button=document.createElement("button");
+    button.type="button";
+    button.className="ha-mobile-menu";
+    button.title="Open Home Assistant menu";
+    button.setAttribute("aria-label","Open Home Assistant menu");
+    const icon=document.createElement("ha-icon");
+    icon.setAttribute("icon","mdi:menu");
+    icon.setAttribute("aria-hidden","true");
+    button.append(icon);
+    button.addEventListener("click",()=>this.dispatchEvent(
+      new Event("hass-toggle-menu",{bubbles:true,composed:true})
+    ));
+    return button;
+  }
   _render(){
     if(!this._hass || !this.isConnected)return;
     if(!this._assetsReady){this._renderAssetStatus();return;}
@@ -165,6 +181,10 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     style.textContent=[
       ":host{display:block;box-sizing:border-box;font-family:var(--primary-font-family,Roboto,Arial,sans-serif);color:var(--primary-text-color)}",
       "*{box-sizing:border-box}",
+      ".ha-mobile-menu{display:none;align-items:center;justify-content:center;width:40px;height:40px;flex:0 0 40px;padding:8px;border:0;border-radius:50%;background:transparent;color:inherit;cursor:pointer}",
+      ".ha-mobile-menu:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:2px}",
+      ".heading-group{display:flex;align-items:center;gap:10px;min-width:0}",
+      "@media(max-width:870px){.ha-mobile-menu{display:inline-flex}}",
       ".shell{max-width:1300px;margin:0 auto;padding:16px 18px 30px}",
       ".header{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 15px}",
       ".title{font-size:24px;font-weight:600;margin:0}",
@@ -188,7 +208,9 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     const title=this._element("div");
     title.append(this._element("h1","Heating","title"));
     title.append(this._element("p","tado X · Integration-managed view","subtitle"));
-    header.append(title);
+    const headingGroup=this._element("div",null,"heading-group");
+    headingGroup.append(this._mobileMenuButton(),title);
+    header.append(headingGroup);
     shell.append(header);
     const tabs=this._element("nav",null,"tabs");
     for(const [name,key] of [["Overview","overview"],["Schedules","schedules"]]){
