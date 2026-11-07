@@ -346,12 +346,17 @@ class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
         # Enable Resume when a room is *known* to be manually overridden
         # OR when automatic adaptation is known disabled. When sensor data is
         # unknown we don't assume interruption or declare normal operation.
-        resume_needed = report["manual_override_count"] > 0 or enabled is False
+        resume_needed = (
+            report["manual_override_count"] > 0
+            or enabled is False
+            or live["boost_timer_active"]
+        )
         status = {
             **saved,
             **live,
             "manual_override_count": report["manual_override_count"],
             "manual_override_rooms": report["manual_override_rooms"],
+            "room_control_states": report["rooms"],
             "manual_off_rooms": report["manual_off_rooms"],
             "rooms_following_schedule": report["schedule_count"],
             "rooms_unknown": report["unknown_count"],
@@ -361,6 +366,7 @@ class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
             "resume_needed": resume_needed,
             "resume_reason": (
                 "manual_room_override" if report["manual_override_count"]
+                else "active_boost" if live["boost_timer_active"]
                 else "adaptation_disabled" if enabled is False
                 else "room_status_unknown" if report["unknown_count"]
                 else "adaptation_unknown" if enabled is None
