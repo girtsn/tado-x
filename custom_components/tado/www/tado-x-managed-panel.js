@@ -81,6 +81,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       await Promise.all([
         import("./x-connectivity-status.js?v="+version+retry),
         import("./x-settings-history-card.js?v="+version+retry),
+        import("./x-presence-history-card.js?v="+version+retry),
         import("./x-schedule-card.js?v="+version+retry),
         import("./x-heating-energy-card.js?v="+version+retry),
       ]);
@@ -138,6 +139,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   _card(type,title){
     const el=document.createElement(xhTag(type));
     el.setConfig({title,config_entry:this._panel?.config?.config_entry,
+      home_id:this._panel?.config?.home_id,
       shared_date_range:this._tab==="overview",
       shared_connection_status:true});
     if(this._tab==="overview")el.dateRange=this._dateRange;
@@ -238,6 +240,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       shell.append(picker);
       const layout=this._element("main",null,"layout");
       const main=this._element("div",null,"stack");
+      main.append(this._card("tado-x-presence-history-card",
+        "Home/Away control and presence history"));
       main.append(this._card("tado-x-settings-history-card",
         "Heating flow, hot water and outside temperature"));
       if(enabled){
@@ -254,6 +258,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       for(const item of [
         "Flow adaptation and hot-water temperature are tado X features",
         "Room override status comes from tado room state readback",
+        "Home/Away history compares Tado selected mode, Tado effective presence and HA Home Presence",
         "Heating setpoint charts use Home Assistant Recorder"
       ])more.append(this._element("li",item));
       info.append(more);
