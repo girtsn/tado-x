@@ -36,8 +36,8 @@ SCHEMA_ADD_METER_READING = vol.Schema(
 
 
 @callback
-def setup_services(hass: HomeAssistant) -> None:
-    """Set up the services for the Tado integration."""
+def setup_services(hass: HomeAssistant, *, extras: bool = False) -> None:
+    """Register base services; expose optional X actions only when enabled."""
 
     async def add_meter_reading(call: ServiceCall) -> None:
         """Send meter reading to Tado."""
@@ -55,9 +55,15 @@ def setup_services(hass: HomeAssistant) -> None:
         if ATTR_MESSAGE in response:
             raise HomeAssistantError(response[ATTR_MESSAGE])
 
-    hass.services.async_register(
-        DOMAIN, SERVICE_ADD_METER_READING, add_meter_reading, SCHEMA_ADD_METER_READING
-    )
+    if not hass.services.has_service(DOMAIN, SERVICE_ADD_METER_READING):
+        hass.services.async_register(
+            DOMAIN, SERVICE_ADD_METER_READING, add_meter_reading, SCHEMA_ADD_METER_READING
+        )
+
+    # Do not populate Home Assistant's service menu with household-specific or
+    # experimental actions on an unconfigured installation.
+    if not extras or hass.services.has_service(DOMAIN, "x_list_rooms"):
+        return
 
     # tado X services live in the existing 'tado' domain so there is no second
     # integration, login, or separate set of device entities.
