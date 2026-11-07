@@ -44,7 +44,8 @@ def _capacities(main) -> dict[str, float]:
     wins over an inferred/nominal inventory value.
     """
     return require_valid_capacities(
-        main.zones, main.config_entry.options.get("x_capacity_kw", {})
+        main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+        main.config_entry.options.get("x_radiator_room_mapping", {})
     )
 
 
@@ -126,7 +127,8 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     try:
         cap = _capacities(main)
     except HomeAssistantError as err:
-        report = radiator_capacity_report(main.zones, main.config_entry.options.get("x_capacity_kw", {}))
+        report = radiator_capacity_report(main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+        main.config_entry.options.get("x_radiator_room_mapping", {}))
         return {
             "status": "radiator_capacity_mapping_needs_review",
             "message": str(err),
