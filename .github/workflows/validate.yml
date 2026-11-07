@@ -40,7 +40,7 @@ jobs:
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
           import re
-          assert re.fullmatch(r'\\d{4}\\.\\d{2}\\.\\d{1,2}', manifest['version'])
+          assert re.fullmatch(r'[0-9]{4}[.][0-9]{2}[.][0-9]{1,2}', manifest['version'])
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY
