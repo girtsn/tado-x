@@ -6,7 +6,7 @@
 - The dashboard uses one Energy-dashboard-style date selector at the top of the Overview tab. It offers **Today, Yesterday, This week, This month, This quarter, This year, Last 7 days, Last 30 days, Last 365 days, Last 12 months, Last 3 years**, and custom calendar ranges. The left/right buttons move to adjacent periods, and Now returns to the current one.
 - The shared selected date range applies to the temperature/history and optional Vaillant gas-allocation cards. A selection is inclusive of the final calendar day; service calls carry an exclusive end timestamp.
 - The gas-allocation history service supports optional `start_time` and `end_time` (offset-aware ISO 8601) while preserving its existing fixed-period API for standalone consumers. History is limited to a three-year range for requested exact bounds, uses locally stored Recorder statistics, and never alters source statistics.
-- Standalone Lovelace cards keep their original period buttons.
+- Removed the old individual period button groups from **both** history cards. When used as standalone Lovelace cards, each now provides the same Energy-style calendar picker rather than the old period buttons.
 - Sidebar icon: `mdi:gas-burner`.
 
 ## Updating
