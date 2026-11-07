@@ -9,7 +9,7 @@ const XH_SOURCES = [
  {id:"adapted",title:"Automatic flow adaptation",match:"Flow adaptation enabled percentage",control:"Automatic flow temperature adaptation",domain:"switch",unit:"%"}
 ];
 const XH_OUTDOOR={id:"outdoor",title:"Outside temperature",domain:"sensor",unit:"°C",color:"#8363b9"};
-const XH_EXTRA=[{title:"DHW mode",match:"DHW operating mode",domain:"select"}];
+
 const XH_PERIODS=[
   {key:"day",label:"24h",days:1,period:"hour"},
   {key:"week",label:"7 days",days:7,period:"hour"},
@@ -23,12 +23,27 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     this._hass=null;this._once=false;this._period="week";
     this._series={};this._busy=false;this._message="";
     this._hidden=new Set();this._actionBusy=false;this._actionMessage="";
+    this._statusTicker=null;
   }
   setConfig(cfg){this._cfg=cfg||{};this._render();}
   set hass(hass){
     this._hass=hass;
     if(!this._once && hass){this._once=true;this._load();}
     else if(!this._busy){this._render();}
+  }
+  connectedCallback(){
+    if(this._statusTicker===null){
+      this._statusTicker=window.setInterval(()=>{
+        if(this.isConnected && this._hass && !this._busy && !this._actionBusy)
+          this._render();
+      },30000);
+    }
+  }
+  disconnectedCallback(){
+    if(this._statusTicker!==null){
+      window.clearInterval(this._statusTicker);
+      this._statusTicker=null;
+    }
   }
   getCardSize(){return 9;}
   static getStubConfig(){return {title:"Flow, hot water and outside temperature history"};}
@@ -247,19 +262,41 @@ class TadoXSettingsHistoryCard extends HTMLElement {
   }
 
 
+  _modeStatus(){
+    const id=this._state("Heating home mode","sensor");
+    const entity=id?this._hass?.states?.[id]:null;
+    if(!entity)return {label:"Unknown",note:"No Home Assistant heating mode sensor found. Install the latest tado X integration and restart."};
+    const a=entity.attributes||{};
+    const ts=a.due_utc?Date.parse(a.due_utc):NaN;
+    const seconds=Number.isFinite(ts)?Math.max(0,Math.ceil((ts-Date.now())/1000)):null;
+    const countdown=seconds!==null&&a.kind==="resume_and_adapt"
+      ? seconds>0?" — resumes in "+Math.ceil(seconds/60)+" min":" — restoring schedules"
+      : a.kind==="adapt_only"?" — re-enabling adaptation":"";
+    return {
+      label:(a.mode_label||entity.state)+countdown,
+      mode:a.mode||"unknown",
+      due:a.due_utc||null,
+      note:"Last mode requested via Home Assistant; actions in the tado app or individual room changes may differ.",
+      recoveryError:a.last_recovery_error||null
+    };
+  }
   async _quickAction(action){
     const options={
       off:{
-        prompt:"Turn heating OFF in all rooms? Frost protection remains active until you resume schedules or adjust rooms manually.",
+        prompt:"Turn heating OFF in every room? Frost protection remains active until schedules are resumed or individual rooms are changed.",
         label:"Heating Off"
       },
       resume:{
-        prompt:"Resume heating schedules in ALL rooms and cancel any manual overrides?",
+        prompt:"Resume schedules in every heating room and ensure automatic flow adaptation is enabled? Any manual room overrides will be cancelled.",
         label:"Resume schedules"
       },
-      boost:{
-        prompt:"Boost heating to the maximum setpoint in ALL rooms for 30 minutes? This temporarily overrides their schedules.",
-        label:"Boost heating"
+      eco_boost:{
+        prompt:"Start Eco Boost for 30 minutes? All rooms request maximum temperatures while automatic flow adaptation stays enabled. The recovery deadline survives Home Assistant restarts.",
+        label:"Eco Boost"
+      },
+      top_boost:{
+        prompt:"Start TOP Boost for 30 minutes? All rooms request maximum temperatures and automatic flow adaptation is temporarily DISABLED, allowing up to your configured maximum flow limit. After 30 minutes, Home Assistant will resume schedules and re-enable adaptation, including after a restart.",
+        label:"Top Boost"
       }
     };
     const selected=options[action];
@@ -269,15 +306,13 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     this._render();
     try{
       const answer=await this._hass.callWS({
-        type:"call_service",
-        domain:"tado",
+        type:"call_service",domain:"tado",
         service:"x_heating_quick_action",
-        service_data:{action},
-        return_response:true
+        service_data:{action},return_response:true
       });
       if(answer?.response?.accepted===false)
         throw new Error("tado did not accept the action");
-      this._actionMessage=selected.label+" accepted by tado. The room states will update on the next normal poll. Flow adaptation and domestic hot water were not changed by this action.";
+      this._actionMessage=selected.label+" request accepted. Scheduled recovery, if applicable, is persisted in Home Assistant. The tado heating rooms will reflect the change on their normal poll.";
     }catch(err){
       this._actionMessage=selected.label+" failed: "+(err?.message||err);
     }finally{
@@ -311,11 +346,17 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       ".legend-item.selected{opacity:1;background:var(--secondary-background-color,#eee)}",
       ".legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0}",
       ".note{font-size:12px;color:var(--secondary-text-color,#777);line-height:1.5;margin:8px 2px}",
-      ".quick-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:9px 0}",
+      ".mode-indicator{border:1px solid var(--divider-color,#ddd);background:var(--secondary-background-color,#f5f5f5);border-radius:8px;padding:12px;margin:9px 0}",
+      ".mode-caption{display:block;font-size:12px;color:var(--secondary-text-color,#666)}",
+      ".mode-value{display:block;font-size:20px;margin-top:5px}",
+      ".mode-detail{display:block;font-size:11px;color:var(--secondary-text-color,#777);margin-top:5px}",
+      ".mode-warning{display:block;font-size:12px;color:var(--error-color,#a33);margin-top:6px}",
+      ".quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:9px 0}",
       ".quick-action{font-size:12px;font-weight:600;padding:12px 4px;line-height:1.25}",
       ".off-action{border-color:var(--error-color,#b73830)}",
       ".resume-action{border-color:var(--success-color,#22936c)}",
       ".boost-action{border-color:var(--warning-color,#e59c28)}",
+      ".top-action{border-color:var(--error-color,#b73830)}",
       ".message{padding:8px;background:var(--secondary-background-color,#eee);border-radius:6px;font-size:13px}"
     ].join("\n");
     root.append(style);
@@ -340,11 +381,21 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       this._outdoorId(),"°C","Weather estimate or selected sensor"));
     card.append(flow);
     card.append(this._el("div","Whole-home heating controls","section-head"));
+    const mode=this._modeStatus();
+    const indicator=this._el("div",null,"mode-indicator");
+    indicator.append(this._el("span","Last HA heating mode","mode-caption"));
+    indicator.append(this._el("strong",mode.label,"mode-value"));
+    indicator.append(this._el("small",mode.note,"mode-detail"));
+    if(mode.recoveryError)indicator.append(this._el(
+      "small","Recovery warning: "+mode.recoveryError,"mode-warning"
+    ));
+    card.append(indicator);
     const actions=this._el("div",null,"quick-actions");
     for(const [label,action,klass] of [
       ["Heating Off","off","off-action"],
       ["Resume Schedules","resume","resume-action"],
-      ["Boost 30 min","boost","boost-action"]
+      ["Eco Boost 30m","eco_boost","boost-action"],
+      ["Top Boost 30m","top_boost","top-action"]
     ]){
       const b=this._button(label,()=>this._quickAction(action));
       b.className="quick-action "+klass;
@@ -352,16 +403,13 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       actions.append(b);
     }
     card.append(actions);
-    card.append(this._el("p","These affect all ten heating rooms only. Boost sets rooms to their maximum temperatures for 30 minutes; it does not intentionally disable automatic flow adaptation. Heating Off keeps frost protection active. Every action asks for confirmation.","note"));
+    card.append(this._el("p","Eco Boost uses tado's maximum room boost with adaptive flow enabled. Top Boost temporarily disables adaptation. Both persist their 30-minute recovery and restore schedules plus adaptive flow. Heating Off retains frost protection. All actions require confirmation.","note"));
     if(this._actionMessage)card.append(this._el("p",this._actionMessage,"message"));
     card.append(this._el("div","Domestic hot water","section-head"));
     const dhw=this._el("div",null,"controls");
     const target=XH_SOURCES.find(x=>x.id==="dhw");
     dhw.append(this._tile("Hot-water target",
       this._state(target.control,"number"),"°C","Target, not measured tank temperature"));
-    dhw.append(this._tile("DHW mode (experimental)",
-      this._state("DHW operating mode","select"),"",
-      "Auto / boost On / Off"));
     card.append(dhw);
     const tabs=this._el("div",null,"tabs");
     for(const range of XH_PERIODS){
@@ -375,9 +423,6 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     if(this._busy)card.append(this._el("p","Reading recorded temperatures…","note"));
     card.append(this._el("p",
       "Temperature history uses one Celsius scale. Maximum flow and DHW are target limits; optimised flow is calculated by tado; outside temperature is from the sensor named below the chart. No trace measures actual boiler outlet flow. Automatic flow adaptation is an On/Off setting; its historical mean percentage is shown in the tile. New setting histories cannot be reconstructed before installation.",
-      "note"));
-    card.append(this._el("p",
-      "DHW Auto requests resumeSchedule, On sends boost ON, and Off sends boost OFF. These HOPS operations are experimental: the hot-water programme could not be read on this home. Check the tado app to confirm how each command behaves before relying on it.",
       "note"));
     root.append(card);
   }

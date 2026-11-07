@@ -1,6 +1,49 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.13 — persisted Eco Boost, Top Boost, and current HA heating mode
+
+New whole-home heating choices:
+
+- **Heating Off**: all room heating OFF (frost protection); supersedes
+  pending boosts and ensures adaptation is enabled.
+- **Resume Schedules**: cancels manual room heating overrides and **always**
+  re-enables automatic flow-temperature adaptation if tado reports it OFF.
+- **Eco Boost 30m**: official tado X all-room boost with adaptation enabled,
+  automatically restores schedules after 30 minutes.
+- **Top Boost 30m**: same room boost, but **disables automatic flow adaptation
+  for 30 minutes**, then resumes all schedules and re-enables adaptation.
+
+Both boost deadlines are persisted in Home Assistant's storage, and recovery
+resumes after a Home Assistant restart even if the deadline expired during
+downtime. Recovery failures retry every five minutes; Home Assistant must
+eventually be running and connected to tado to restore adaptation. The
+configured max flow-temperature limit is not increased by Top Boost.
+
+The new **Heating home mode** sensor and dashboard mode strip show the last
+mode requested *through Home Assistant*, the boost's remaining time, and
+recovery warnings. They cannot guarantee the current app/valve state if the
+mode was changed outside Home Assistant. The JS card automatically exposes
+these features after installing v2026.11.13; no dashboard YAML replacement.
+
+```yaml
+action: tado.x_heating_quick_action
+data:
+  action: top_boost  # also off / resume / eco_boost
+```
+
+The old `action: boost` still means Eco Boost for compatibility.
+
+The old DHW Auto/On/Off selector is removed because no meaningful DHW
+schedule was exposed for the user's tado X home. DHW temperature remains
+available and independently editable. The legacy experimental DHW services
+remain for compatibility.
+
+The only JS resource that needs cache busting is
+`/tado/x-settings-history-card.js?v=2026.11.13`.
+
+
+
 ## v2026.11.12 — three whole-home heating quick actions and a single temperature chart
 
 The Overview card now offers **Heating Off**, **Resume Schedules**, and

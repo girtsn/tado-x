@@ -199,19 +199,33 @@ def setup_services(hass: HomeAssistant) -> None:
     )
 
     async def x_heating_home_action(call: ServiceCall) -> dict:
-        """On-demand tado X quick action; one HOPS POST and no boiler write."""
+        """On-demand heating modes, including crash-safe 30-minute Top Boost."""
         main = get_x_coordinator(call)
-        result = await TadoXClient(main).heating_quick_action(call.data["action"])
-        # Avoid extra cloud GET requests here: the normal zone polling loop
-        # will read the actual effect. HTTP acceptance is not device readback.
-        return result
+        manager = getattr(main, "x_heating_modes", None)
+        if manager is None:
+            raise ServiceValidationError("tado X heating mode manager unavailable")
+        return await manager.async_action(call.data["action"])
+
+    async def x_heating_mode_status(call: ServiceCall) -> dict:
+        """Local status only; no HOPS requests or configuration changes."""
+        main = get_x_coordinator(call)
+        manager = getattr(main, "x_heating_modes", None)
+        if manager is None:
+            raise ServiceValidationError("tado X heating mode manager unavailable")
+        return manager.status()
 
     hass.services.async_register(
         DOMAIN, "x_heating_quick_action", x_heating_home_action,
         schema=vol.Schema({
             **home,
-            vol.Required("action"): vol.In(("off", "resume", "boost")),
+            vol.Required("action"): vol.In((
+                "off", "resume", "boost", "eco_boost", "top_boost"
+            )),
         }), supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, "x_heating_mode_status", x_heating_mode_status,
+        schema=vol.Schema(home), supports_response=SupportsResponse.ONLY,
     )
 
     async def x_compute_estimates(call: ServiceCall) -> dict:

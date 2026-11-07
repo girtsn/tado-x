@@ -373,27 +373,51 @@ x_diagnose_unallocated_heating:
           integration: tado
 
 x_heating_quick_action:
-  name: Whole-home tado X heating quick action
+  name: Whole-home tado X heating mode
   description: >-
-    Explicitly control ALL tado X heating rooms with one home-wide HOPS
-    quickActions request, like the app. Action 'off' enables frost protection
-    until resumed, 'resume' cancels manual room overrides and restores their
-    smart schedules, and 'boost' requests maximum room setpoints for 30 minutes.
-    These actions exclude domestic hot water and DO NOT change flow temperature
-    adaptation or boiler settings. HTTPS acceptance is not confirmation that
-    physical radiator valves have changed; room states update on normal polling.
+    All actions affect all tado X heating rooms, not domestic hot water.
+    'off' applies frost protection and cancels any boost timer. 'resume'
+    cancels manual overrides, resumes room schedules and ENSURES automatic
+    flow-temperature adaptation is enabled. 'eco_boost' enables adaptation
+    and boosts all rooms for 30 minutes. 'top_boost' temporarily disables
+    adaptation and boosts all rooms for 30 minutes, then resumes schedules
+    and restores adaptation. BOTH boost deadlines persist across Home
+    Assistant restarts and failed recoveries retry every five minutes.
+    Legacy 'boost' is an alias for 'eco_boost'. Home Assistant must be
+    running and connected to tado to perform recovery; an extended outage
+    can delay restoration until HA comes back. Native tado boost still has
+    its own 30-minute timeout. Writes use experimental HOPS endpoints.
+    No change is made without an explicit call, except a previously
+    requested, persistently scheduled recovery.
   fields:
     action:
       required: true
       selector:
         select:
           options:
-            - label: Turn heating off (all rooms, frost protection)
+            - label: Heating Off (all rooms, frost protection)
               value: "off"
-            - label: Resume all room schedules
+            - label: Resume Schedules + enable adaptive flow
               value: resume
-            - label: Boost all rooms for 30 minutes
+            - label: Eco Boost — maximum room heat for 30m, adaptive enabled
+              value: eco_boost
+            - label: Top Boost — maximum room heat for 30m, adaptive disabled
+              value: top_boost
+            - label: Legacy Boost (same as Eco Boost)
               value: boost
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
+x_heating_mode_status:
+  name: Show last Home Assistant heating mode and persisted recovery
+  description: >-
+    Read local mode persistence and any scheduled boost recovery without
+    making cloud requests. Shows last mode requested through HA, not a
+    confirmed state from tado; direct app or valve changes are not tracked.
+  fields:
     config_entry:
       required: false
       selector:
