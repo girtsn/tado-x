@@ -25,6 +25,8 @@ jobs:
           for script in custom_components/tado/www/*.js; do
             node --input-type=module --check < "$script"
           done
+      - name: Test dashboard loader and hot-swap logic
+        run: node tests/test_frontend_loader.cjs
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
@@ -33,7 +35,7 @@ jobs:
           base = Path('custom_components/tado')
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
-          assert manifest['version']=='2026.11.21'
+          assert manifest['version']=='2026.11.22'
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY

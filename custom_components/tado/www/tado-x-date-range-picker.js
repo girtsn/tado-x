@@ -191,6 +191,13 @@ class TadoXDateRangePicker extends HTMLElement {
     right.append(footer);popup.append(right);root.append(popup);
   }
 }
+// Managed dashboard uses release-scoped component tags; stable names remain
+// available to existing user-authored Lovelace cards.
+const XH_COMPONENT_VERSION=(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
+const XH_COMPONENT_TAG="tado-x-date-range-picker-v"+XH_COMPONENT_VERSION;
+if(!customElements.get(XH_COMPONENT_TAG))
+  customElements.define(XH_COMPONENT_TAG,class extends TadoXDateRangePicker {});
+
 if(!customElements.get("tado-x-date-range-picker"))
   customElements.define("tado-x-date-range-picker",TadoXDateRangePicker);
 

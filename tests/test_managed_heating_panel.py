@@ -16,8 +16,9 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         backend = (TADO / "__init__.py").read_text()
         panel = (TADO / "www" / "tado-x-managed-panel.js").read_text()
         self.assertIn('frontend_url_path="tado-x-heating"', backend)
-        self.assertIn('webcomponent_name="tado-x-managed-heating-panel"', backend)
-        self.assertIn('module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}"', backend)
+        self.assertIn('webcomponent_name="tado-x-heating-loader-panel"', backend)
+        self.assertIn('module_url="/tado/x-heating-loader.js"', backend)
+        self.assertIn('f"/tado/assets/{INTEGRATION_VERSION}/x-managed-panel.js"', backend)
         for component in (
             "tado-x-settings-history-card",
             "tado-x-schedule-card",
@@ -37,7 +38,8 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn('encodeURIComponent(XH_ASSET_VERSION)', panel)
         self.assertIn('sidebar_icon="mdi:gas-burner"', backend)
         self.assertIn('"integration_version": INTEGRATION_VERSION', backend)
-        self.assertIn("oldVersion!==value.config.integration_version", panel)
+        self.assertIn('xhTag("tado-x-managed-heating-panel")', panel)
+        self.assertIn('document.createElement(xhTag(type))', panel)
         self.assertIn('cache_headers=False', backend)
 
 
@@ -49,8 +51,11 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn('this._assetsReady', panel)
         self.assertIn('Retry loading', panel)
         self.assertIn('this._renderAssetStatus();', panel)
-        self.assertIn('tado-x-panel-reload-', panel)
-        self.assertIn('window.sessionStorage.getItem(key)', panel)
+        self.assertIn('xhTag("tado-x-date-range-picker")', panel)
+        self.assertNotIn('window.location.reload()', panel)
+        loader = (TADO / "www" / "tado-x-heating-loader.js").read_text()
+        self.assertIn('cache:"no-store"', loader)
+        self.assertIn('await import(url)', loader)
         self.assertIn('new URL(import.meta.url)', panel)
 
     def test_exact_range_supported_on_both_history_cards(self):
@@ -73,6 +78,7 @@ class ManagedHeatingPanelTests(unittest.TestCase):
             self.assertNotIn('this._period', source)
             self.assertNotIn('XH_PERIODS', source)
         self.assertIn('/tado/x-date-range-picker.js', (TADO / '__init__.py').read_text())
+        self.assertIn('f"/tado/assets/{INTEGRATION_VERSION}/x-date-range-picker.js"', (TADO / '__init__.py').read_text())
 
     def test_independent_tado_x_cloud_health_and_dashboard_status(self):
         binary = (TADO / "binary_sensor.py").read_text()

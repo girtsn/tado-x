@@ -294,6 +294,13 @@ class TadoXScheduleCard extends HTMLElement {
     root.append(card);
   }
 }
+// Managed dashboard uses release-scoped component tags; stable names remain
+// available to existing user-authored Lovelace cards.
+const XH_COMPONENT_VERSION=(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
+const XH_COMPONENT_TAG="tado-x-schedule-card-v"+XH_COMPONENT_VERSION;
+if(!customElements.get(XH_COMPONENT_TAG))
+  customElements.define(XH_COMPONENT_TAG,class extends TadoXScheduleCard {});
+
 if(!customElements.get("tado-x-schedule-card")) customElements.define("tado-x-schedule-card",TadoXScheduleCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-schedule-card",name:"tado X weekly schedules",
