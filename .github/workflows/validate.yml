@@ -25,7 +25,7 @@ jobs:
           node --check custom_components/tado/www/tado-x-schedule-card.js
           node --check custom_components/tado/www/tado-x-heating-energy-card.js
           node --check custom_components/tado/www/tado-x-settings-history-card.js
-          node --check custom_components/tado/www/tado-x-managed-panel.js
+          node --input-type=module --check < custom_components/tado/www/tado-x-managed-panel.js
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
