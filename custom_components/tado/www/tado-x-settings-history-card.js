@@ -82,74 +82,168 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     b.addEventListener("click",fn);return b;
   }
   _round(v){return Number.isFinite(v)?Number(v).toLocaleString(undefined,{maximumFractionDigits:1}):"—";}
-  _chart(source){
-    const id=this._state(source.match,"sensor");
-    const data=(id&&this._series[id]||[]).filter(p=>Number.isFinite(p.mean) && Number.isFinite(p.start));
-    const outer=this._el("div",null,"plot");
-    const title=this._el("div",source.title,"plot-title");outer.append(title);
-    const current=id?this._hass.states[id]?.state:null;
-    outer.append(this._el("div",(current!=null&&Number.isFinite(+current)?this._round(+current)+" "+source.unit:"—"),"value"));
-    if(!data.length){
-      outer.append(this._el("p",id?"No recorded statistics in selected period.":"History sensor not found; check tado X integration.","note"));
-      return outer;
+
+  _outdoorId(){
+    if(!this._hass)return null;
+    if(this._cfg.outdoor_entity){
+      return this._hass.states[this._cfg.outdoor_entity]
+        ? this._cfg.outdoor_entity : null;
     }
-    const xs=data.map(r=>Number(r.start));
-    const ys=data.map(r=>Number(r.mean));
-    let min=Math.min(...ys),max=Math.max(...ys);
-    if(Math.abs(max-min)<.1){min-=1;max+=1;}
-    else {const d=(max-min)*.12;min-=d;max+=d;}
-    if(source.id==="adapted"){min=Math.max(0,min);max=Math.min(100,Math.max(1,max));}
-    const xMin=Math.min(...xs),xMax=Math.max(...xs);
-    const w=340,h=132,l=32,r=8,t=9,b=22;
-    const xp=x=>l+((x-xMin)/(xMax-xMin||1))*(w-l-r);
-    const yp=y=>t+(max-y)/(max-min||1)*(h-t-b);
-    const uri="http://www.w3.org/2000/svg";
-    const svg=document.createElementNS(uri,"svg");
-    svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
-    svg.setAttribute("role","img");
-    svg.setAttribute("aria-label",source.title+" recorded history");
-    for(let k=0;k<3;k++){
-      const value=min+(max-min)*k/2, y=yp(value);
-      const line=document.createElementNS(uri,"line");
-      Object.entries({x1:l,x2:w-r,y1:y,y2:y,stroke:"var(--divider-color,#ddd)","stroke-width":"1"}).forEach(([a,v])=>line.setAttribute(a,String(v)));
-      svg.append(line);
-      const label=document.createElementNS(uri,"text");
-      label.textContent=this._round(value);
-      label.setAttribute("x",l-4);label.setAttribute("y",y+3);label.setAttribute("text-anchor","end");
-      label.setAttribute("fill","var(--secondary-text-color,#777)");
-      label.setAttribute("font-size","9");svg.append(label);
+    const ranked=Object.entries(this._hass.states)
+      .filter(([id,st])=>id.startsWith("sensor.") &&
+        Number.isFinite(Number(st.state)) &&
+        (st.attributes?.device_class==="temperature" ||
+         /°c|celsius/i.test(st.attributes?.unit_of_measurement||"")))
+      .map(([id,st])=>{
+        const label=(st.attributes?.friendly_name||id).toLowerCase();
+        const key=id.toLowerCase();
+        if(!/outdoor|outside|garden temperature|weather temperature/.test(label+" "+key))
+          return null;
+        const platform=this._hass.entities?.[id]?.platform;
+        const score=(platform==="tado"?100:0)
+          +(key.includes("tado")?80:0)
+          +(label.includes("outdoor temperature")?30:0)
+          +(label.includes("outside temperature")?25:0)
+          +(key.includes("vaillant")?10:0);
+        return {id,score};
+      }).filter(Boolean).sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id));
+    return ranked[0]?.id||null;
+  }
+  _sensorId(source){
+    return source.id==="outdoor"?this._outdoorId():this._state(source.match,"sensor");
+  }
+  _rows(source){
+    const id=this._sensorId(source),rows=id?this._series[id]:null;
+    return (Array.isArray(rows)?rows:[])
+      .filter(row=>Number.isFinite(Number(row.start)) &&
+        Number.isFinite(Number(row.mean)))
+      .map(row=>({x:Number(row.start),y:Number(row.mean)}))
+      .sort((a,b)=>a.x-b.x);
+  }
+  _formatValue(id,unit){
+    const raw=id?this._hass?.states?.[id]?.state:null;
+    if(raw==="on")return "On";
+    if(raw==="off")return "Off";
+    const val=raw!=null?Number(raw):NaN;
+    return Number.isFinite(val)?this._round(val)+(unit?" "+unit:""):"Unavailable";
+  }
+  _tile(label,id,unit,detail){
+    const tile=this._el("button",null,"setting-tile");
+    tile.disabled=!id;
+    tile.append(this._el("span",label,"tile-label"));
+    tile.append(this._el("strong",this._formatValue(id,unit),"tile-value"));
+    if(detail)tile.append(this._el("small",detail,"tile-note"));
+    tile.addEventListener("click",()=>this._showMore(id));
+    return tile;
+  }
+  _dateLabel(ts){
+    const opts=this._period==="day"?{hour:"2-digit",minute:"2-digit"}:
+      (this._period==="year"||this._period==="3years")
+        ?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
+    return new Date(ts).toLocaleString(undefined,opts);
+  }
+  _combinedChart(){
+    const wrap=this._el("section",null,"plot");
+    wrap.append(this._el("h3","Temperature trends","plot-title"));
+    const sources=[XH_SOURCES[0],XH_SOURCES[1],XH_SOURCES[2],XH_OUTDOOR];
+    const legend=this._el("div",null,"legend");
+    for(const src of sources){
+      const id=this._sensorId(src),rows=this._rows(src);
+      const active=!this._hidden.has(src.id);
+      const btn=this._button(src.title,()=>{
+        if(this._hidden.has(src.id))this._hidden.delete(src.id);
+        else this._hidden.add(src.id);
+        this._render();
+      },active);
+      btn.className="legend-item"+(active?" selected":"");
+      btn.disabled=!id && !rows.length;
+      btn.setAttribute("aria-pressed",String(active));
+      const dot=this._el("i",null,"legend-dot");dot.style.background=src.color;
+      btn.prepend(dot);legend.append(btn);
     }
-    const points=xs.map((x,i)=>`${xp(x)},${yp(ys[i])}`).join(" ");
-    if(data.length>1){
-      const poly=document.createElementNS(uri,"polyline");
-      poly.setAttribute("points",points);poly.setAttribute("fill","none");
-      poly.setAttribute("stroke","var(--primary-color,#1976d2)");
-      poly.setAttribute("stroke-width","2");poly.setAttribute("stroke-linejoin","round");
-      svg.append(poly);
+    wrap.append(legend);
+    const visible=sources.filter(src=>!this._hidden.has(src.id))
+      .map(src=>({src,rows:this._rows(src)})).filter(item=>item.rows.length);
+    if(!visible.length){
+      wrap.append(this._el("p","No recorded temperatures for these lines yet. Historical settings begin when the sensors were installed.","note"));
+      return wrap;
     }
-    if(data.length<=90){
-      xs.forEach((x,i)=>{
-        const circle=document.createElementNS(uri,"circle");
-        circle.setAttribute("cx",xp(x));circle.setAttribute("cy",yp(ys[i]));
-        circle.setAttribute("r",data.length<=45?"2.2":"1.2");
-        circle.setAttribute("fill","var(--primary-color,#1976d2)");
-        const caption=document.createElementNS(uri,"title");
-        caption.textContent=new Date(x).toLocaleDateString()+" — "+this._round(ys[i])+" "+source.unit;
-        circle.append(caption);svg.append(circle);
-      });
+    const period=XH_PERIODS.find(p=>p.key===this._period);
+    const maxTime=Date.now(),minTime=maxTime-period.days*86400000;
+    const values=visible.flatMap(i=>i.rows.map(p=>p.y));
+    let low=Math.floor((Math.min(...values)-2)/5)*5;
+    let high=Math.ceil((Math.max(...values)+2)/5)*5;
+    if(high-low<10){low-=5;high+=5;}
+    const width=460,height=230,left=38,right=12,top=14,bottom=32;
+    const xp=ts=>left+Math.max(0,Math.min(1,(ts-minTime)/(maxTime-minTime)))*(width-left-right);
+    const yp=val=>top+(high-val)/(high-low)*(height-top-bottom);
+    const ns="http://www.w3.org/2000/svg";
+    const svgElement=(tag,attrs={})=>{
+      const node=document.createElementNS(ns,tag);
+      for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));
+      return node;
+    };
+    const svg=svgElement("svg",{viewBox:"0 0 "+width+" "+height,role:"img",
+      "aria-label":"Historical maximum flow, optimised flow, hot-water and outside temperatures"});
+    for(let step=0;step<=5;step++){
+      const value=low+(high-low)*step/5,y=yp(value);
+      svg.append(svgElement("line",{x1:left,x2:width-right,y1:y,y2:y,
+        stroke:"var(--divider-color,#ddd)","stroke-width":1}));
+      const lab=svgElement("text",{x:left-6,y:y+4,"text-anchor":"end",
+        fill:"var(--secondary-text-color,#777)","font-size":12});
+      lab.textContent=this._round(value);svg.append(lab);
     }
-    const startLabel=document.createElementNS(uri,"text"),endLabel=document.createElementNS(uri,"text");
-    startLabel.textContent=new Date(xMin).toLocaleDateString();
-    endLabel.textContent=new Date(xMax).toLocaleDateString();
-    for(const [node,x,anchor] of [[startLabel,l,"start"],[endLabel,w-r,"end"]]){
-      node.setAttribute("x",x);node.setAttribute("y",h-2);node.setAttribute("font-size","10");
-      node.setAttribute("text-anchor",anchor);
-      node.setAttribute("fill","var(--secondary-text-color,#777)");
-      svg.append(node);
+    for(const [when,anchor] of [
+      [minTime,"start"],[(minTime+maxTime)/2,"middle"],[maxTime,"end"]
+    ]){
+      const label=svgElement("text",{x:xp(when),y:height-5,"text-anchor":anchor,
+        fill:"var(--secondary-text-color,#777)","font-size":11});
+      label.textContent=this._dateLabel(when);svg.append(label);
     }
-    outer.append(svg);
-    outer.append(this._el("div","Period average "+this._round(ys.reduce((a,b)=>a+b,0)/ys.length)+" "+source.unit,"note"));
-    return outer;
+    for(const item of visible){
+      const maxGap=period.period==="hour"?4*3600000:
+        period.period==="day"?4*86400000:65*86400000;
+      let segment=[],previous=null;
+      const segments=[];
+      for(const p of item.rows){
+        if(p.x<minTime||p.x>maxTime)continue;
+        if(previous!==null&&p.x-previous>maxGap&&segment.length){
+          segments.push(segment);segment=[];
+        }
+        segment.push(p);previous=p.x;
+      }
+      if(segment.length)segments.push(segment);
+      for(const points of segments){
+        if(points.length>1){
+          svg.append(svgElement("polyline",{
+            points:points.map(p=>xp(p.x)+","+yp(p.y)).join(" "),
+            fill:"none",stroke:item.src.color,"stroke-width":2.8,
+            "stroke-linecap":"round","stroke-linejoin":"round"
+          }));
+        }
+        if(points.length<=95){
+          for(const p of points){
+            const circle=svgElement("circle",{
+              cx:xp(p.x),cy:yp(p.y),r:2.8,fill:item.src.color
+            });
+            const title=svgElement("title");
+            title.textContent=item.src.title+": "+this._round(p.y)+
+              " °C — "+new Date(p.x).toLocaleString();
+            circle.append(title);svg.append(circle);
+          }
+        }
+      }
+    }
+    wrap.append(svg);
+    const outside=this._outdoorId();
+    const source=outside?
+      (this._hass.states[outside]?.attributes?.friendly_name||outside)+" ("+outside+")":
+      this._cfg.outdoor_entity?
+        "Configured sensor "+this._cfg.outdoor_entity+" was not found":
+        "No suitable outside temperature sensor found";
+    wrap.append(this._el("p","Outside source: "+source+
+      ". Tap a legend item to hide or show a temperature line.","note"));
+    return wrap;
   }
   _render(){
     const root=this.shadowRoot;root.replaceChildren();
