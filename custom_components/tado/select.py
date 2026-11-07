@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
 from .entity import TadoHomeEntity
+from .presence_mode import effective_presence, selected_presence_mode
 
 
 async def async_setup_entry(
@@ -36,16 +37,18 @@ class TadoPresenceSelect(TadoHomeEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Reflect the mode reported by Tado, not the last requested mode."""
-        geofence = self.coordinator.data.get("geofence")
-        if not isinstance(geofence, dict):
-            return None
-        locked = geofence.get("presenceLocked")
-        if locked is False:
-            return "Auto"
-        if locked is not True:
-            return None
-        presence = geofence.get("presence")
-        return {"HOME": "Home", "AWAY": "Away"}.get(presence)
+        return selected_presence_mode(self.coordinator.data.get("geofence"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Expose both control mode and observed presence to HA diagnostics."""
+        return {
+            "tado_home_id": str(self.coordinator.home_id),
+            "presence_scope": "selected",
+            "effective_presence": effective_presence(
+                self.coordinator.data.get("geofence")
+            ),
+        }
 
     async def async_select_option(self, option: str) -> None:
         """Send the selected household mode to Tado and refresh its state."""
