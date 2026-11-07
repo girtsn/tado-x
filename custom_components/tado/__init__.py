@@ -12,7 +12,7 @@ from PyTado.interface import Tado
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
@@ -40,6 +40,7 @@ from .services import setup_services
 from .tadox_ext import TadoXSettingsCoordinator
 from .heating_modes import HeatingModeManager
 from .heat_allocation import allocate_recent
+from .managed_dashboard import async_install_managed_dashboard
 from .x_features import energy_enabled, restore_used_legacy_energy_option
 
 PLATFORMS = [
@@ -78,6 +79,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                          cache_headers=False),
         StaticPathConfig("/tado/x-settings-history-card.js",
                          str(folder / "tado-x-settings-history-card.js"),
+                         cache_headers=False),
+        StaticPathConfig("/tado/x-heating-dashboard.js",
+                         str(folder / "tado-x-heating-dashboard.js"),
                          cache_headers=False),
         StaticPathConfig("/tado/x-managed-panel.js",
                          str(folder / "tado-x-managed-panel.js"),
@@ -185,6 +189,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 "Unable to register the integration-managed tado X Heating "
                 "panel; existing dashboards remain usable",
                 exc_info=True,
+            )
+
+    if coordinator.is_x:
+        # A managed dashboard is registered only after Lovelace/frontend has
+        # completed setup. Use a dedicated path; never replace a user's
+        # hand-edited Heating dashboard or automations/helpers.
+        async def install_dashboard():
+            try:
+                await async_install_managed_dashboard(hass)
+            except Exception:
+                # Dashboard is a convenience; never block the heating system
+                # or trigger reauthentication if Lovelace is not available.
+                _LOGGER.warning(
+                    "Unable to install managed tado X dashboard",
+                    exc_info=True,
+                )
+
+        if hass.is_running:
+            hass.async_create_task(install_dashboard())
+        else:
+            @callback
+            def install_after_start(event):
+                hass.async_create_task(install_dashboard())
+
+            entry.async_on_unload(
+                hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, install_after_start
+                )
             )
 
     if coordinator.is_x and energy_enabled(entry):
