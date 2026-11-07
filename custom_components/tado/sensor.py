@@ -32,7 +32,6 @@ from .const import (
 from .coordinator import TadoDataUpdateCoordinator
 from .entity import TadoHomeEntity, TadoZoneEntity
 from .room_override import room_override_report, observed_home_mode, _read_zone
-from .x_features import advanced_enabled
 from .x_entities import (
     TadoXAdaptedFlowSensor,
     TadoXSettingHistorySensor,
@@ -260,7 +259,7 @@ async def async_setup_entry(
             ),
             TadoXAdaptationEnabledPercentSensor(tado.x_settings, tado),
         ])
-    if tado.is_x and advanced_enabled(entry) and getattr(tado, "x_heating_modes", None):
+    if tado.is_x and getattr(tado, "x_heating_modes", None):
         entities.append(TadoXHeatingHomeModeSensor(tado))
         entities.extend([
             TadoXRoomScheduleControlSensor(tado, zone["id"], zone["name"])
