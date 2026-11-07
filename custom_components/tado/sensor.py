@@ -258,7 +258,36 @@ async def async_setup_entry(
             ),
             TadoXAdaptationEnabledPercentSensor(tado.x_settings, tado),
         ])
+    if tado.is_x and getattr(tado, "x_heating_modes", None):
+        entities.append(TadoXHeatingHomeModeSensor(tado))
     async_add_entities(entities, True)
+
+
+class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
+    """Persisted last Home Assistant whole-home heating action.
+
+    This is NOT a verified mode from tado itself. Changes made in the tado
+    app or directly on thermostats may not be reflected here.
+    """
+
+    _attr_name = "Heating home mode"
+    _attr_icon = "mdi:home-thermometer"
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.home_id}_x_heating_home_mode"
+
+    @property
+    def native_value(self):
+        manager = getattr(self.coordinator, "x_heating_modes", None)
+        return manager.status()["mode_label"] if manager else "Unknown"
+
+    @property
+    def extra_state_attributes(self):
+        manager = getattr(self.coordinator, "x_heating_modes", None)
+        return manager.status() if manager else {
+            "mode": "unknown", "mode_confirmed_by_device": False
+        }
 
 
 class TadoHomeSensor(TadoHomeEntity, SensorEntity):
