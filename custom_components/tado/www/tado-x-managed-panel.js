@@ -90,17 +90,18 @@ class TadoXDateRangePicker extends HTMLElement {
     const end=xhMidnight(new Date(this._range.end));
     const preset=this._range.preset;
     let nextStart,nextEnd;
-    const months=({month:1,quarter:3,last12months:12,year:12,last3years:36})[preset];
+    const months=({month:1,quarter:3,year:12})[preset];
     if(months){
-      const delta=months*direction;
-      nextStart=new Date(start.getFullYear(),start.getMonth()+delta,1);
-      nextEnd=new Date(end.getFullYear(),end.getMonth()+delta,1);
-      // For an open current month/year, shifting forward should allow
-      // returning to today's period without selecting future days.
-      if(direction>0 && nextEnd>xhAddDays(xhMidnight(new Date()),1)){
-        this._apply(...[xhMidnight(new Date(xhPresetRange(preset).start)),
-          xhMidnight(new Date(xhPresetRange(preset).end)),preset]);return;
-      }
+      nextStart=new Date(start.getFullYear(),start.getMonth()+months*direction,1);
+      nextEnd=new Date(start.getFullYear(),start.getMonth()+months*(direction+1),1);
+      const tomorrow=xhAddDays(xhMidnight(new Date()),1);
+      if(nextEnd>tomorrow)nextEnd=tomorrow;
+    }else if(preset==="last12months"||preset==="last3years"){
+      const monthsBack=preset==="last3years"?36:12;
+      nextStart=new Date(start.getFullYear(),start.getMonth()+monthsBack*direction,start.getDate());
+      nextEnd=new Date(start.getFullYear(),start.getMonth()+monthsBack*(direction+1),start.getDate());
+      const tomorrow=xhAddDays(xhMidnight(new Date()),1);
+      if(nextEnd>tomorrow)nextEnd=tomorrow;
     }else{
       const diff=xhDaySpan(start,end);
       nextStart=xhAddDays(start,diff*direction);
