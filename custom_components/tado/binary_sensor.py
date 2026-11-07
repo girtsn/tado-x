@@ -236,6 +236,7 @@ class TadoXVaillantEnergyEnabledBinarySensor(TadoHomeEntity, BinarySensorEntity)
             "read_only": True,
             "enabled_from": "tado_integration_options",
             "general_tado_x_controls_always_enabled": True,
+            "tado_home_id": str(self.coordinator.home_id),
         }
 
 
