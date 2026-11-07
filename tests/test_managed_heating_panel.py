@@ -23,11 +23,34 @@ class ManagedHeatingPanelTests(unittest.TestCase):
             "tado-x-schedule-card",
             "tado-x-heating-energy-card",
         ):
-            self.assertIn('import "./x-', panel)
+            self.assertIn('import("./x-', panel)
             self.assertIn(f'"{component}"', panel)
         self.assertIn("_energyEnabled()", panel)
         self.assertIn("household_vaillant_mypyllant_gas_allocation", panel)
         self.assertIn("this._tab===\"overview\"", panel)
+        self.assertIn("date-range-changed", panel)
+        self.assertIn('"last3years"', panel)
+        self.assertIn("shared_date_range:this._tab", panel)
+        self.assertIn('new URL(import.meta.url)', panel)
+        self.assertIn('encodeURIComponent(XH_ASSET_VERSION)', panel)
+        self.assertIn('sidebar_icon="mdi:gas-burner"', backend)
+        self.assertIn('cache_headers=False', backend)
+
+
+    def test_exact_range_supported_on_both_history_cards(self):
+        backend = (TADO / "heat_allocation.py").read_text()
+        service = (TADO / "services.py").read_text()
+        settings = (TADO / "www" / "tado-x-settings-history-card.js").read_text()
+        gas = (TADO / "www" / "tado-x-heating-energy-card.js").read_text()
+        self.assertIn("start_time: str | None", backend)
+        self.assertIn("end_time: str | None", backend)
+        self.assertIn("end - start > timedelta(days=1099)", backend)
+        self.assertIn("start_time=call.data.get", service)
+        self.assertIn("end_time=call.data.get", service)
+        self.assertIn('this._dateRange.start', settings)
+        self.assertIn('this._dateRange.end', settings)
+        self.assertIn('args.start_time=this._dateRange.start', gas)
+        self.assertIn('args.end_time=this._dateRange.end', gas)
 
     def test_only_one_vaillant_option_not_advanced_tado_switches(self):
         flow = (TADO / "config_flow.py").read_text()
