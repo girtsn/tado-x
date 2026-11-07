@@ -329,7 +329,9 @@ async def allocation_history(
         await hourly_between(begin, end)
     else:
         first_month = begin_local.replace(day=1)
-        final_month = end_local.replace(day=1)
+        last_observed = (end - timedelta(microseconds=1)).astimezone(tz)
+        final_month = last_observed.replace(day=1, hour=0, minute=0,
+                                            second=0, microsecond=0)
         next_first_month = (
             first_month.replace(year=first_month.year + 1, month=1)
             if first_month.month == 12
@@ -358,7 +360,9 @@ async def allocation_history(
                     )
                     # Entire month must be within selected period, and be
                     # finished. The ongoing current month is an hourly edge.
-                    if (local_month.astimezone(timezone.utc) >= begin
+                    step = float(row["start"]) - float(previous["start"])
+                    if (25 * 86400 <= step <= 35 * 86400 and
+                            local_month.astimezone(timezone.utc) >= begin
                             and month_after.astimezone(timezone.utc) <= end):
                         delta = float(row["sum"]) - float(previous["sum"])
                         if delta >= -0.0001:
