@@ -26,10 +26,10 @@ _LOGGER = logging.getLogger(__name__)
 MANAGED_DASHBOARD_PATH = "tado-x-heating"
 STRATEGY = {"strategy": {"type": "custom:tado-x-heating"}}
 RESOURCE_FILES = (
-    "tado-x-settings-history-card.js",
-    "tado-x-schedule-card.js",
-    "tado-x-heating-energy-card.js",
-    "tado-x-heating-dashboard.js",
+    "x-settings-history-card.js",
+    "x-schedule-card.js",
+    "x-heating-energy-card.js",
+    "x-heating-dashboard.js",
 )
 
 
