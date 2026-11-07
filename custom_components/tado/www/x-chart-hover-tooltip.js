@@ -84,7 +84,7 @@ export function attachRecorderChartTooltip(container,svg,series,options){
       markers[i].setAttribute("visibility",valid?"visible":"hidden");
       if(valid){
         markers[i].setAttribute("cx",xFor(p.x));
-        markers[i].setAttribute("cy",yFor(p.y));
+        markers[i].setAttribute("cy",yFor(p.y,i));
       }
       const row=document.createElement("div");
       row.style.cssText="display:flex;align-items:center;gap:7px;white-space:nowrap";
