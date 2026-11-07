@@ -32,7 +32,11 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       }
     }
   }
-  set panel(value){this._panel=value;}
+  set panel(value){
+    const oldId=this._panel?.config?.config_entry;
+    this._panel=value;
+    if(this._hass && oldId!==value?.config?.config_entry)this._render();
+  }
   set narrow(value){this._narrow=Boolean(value);}
   set route(value){
     const requested=(value?.path||"").split("/").filter(Boolean)[0];
@@ -52,6 +56,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     return Object.entries(this._hass.states).some(([id,state])=>
       id.startsWith("binary_sensor.") &&
       state.attributes?.feature==="household_vaillant_mypyllant_gas_allocation" &&
+      (!this._panel?.config?.home_id ||
+       String(state.attributes?.tado_home_id)===String(this._panel.config.home_id)) &&
       state.state==="on"
     );
   }
@@ -63,7 +69,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   _card(type,title){
     const el=document.createElement(type);
-    el.setConfig({title});
+    el.setConfig({title,config_entry:this._panel?.config?.config_entry});
     el.hass=this._hass;
     this._cards.push(el);
     return el;
