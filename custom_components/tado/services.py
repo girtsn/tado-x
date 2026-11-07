@@ -12,7 +12,7 @@ from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import allocate_recent, allocation_history, diagnose_unallocated
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 from .room_override import room_override_report, observed_home_mode
-from .x_features import advanced_enabled, energy_enabled
+from .x_features import energy_enabled
 
 from .const import (
     ATTR_MESSAGE,
@@ -74,14 +74,14 @@ def setup_services(hass: HomeAssistant, *, extras: bool = False) -> None:
                    and e.runtime_data.coordinator.is_x]
         if selected:
             entries = [e for e in entries if e.entry_id == selected]
-        enabled = energy_enabled if energy else advanced_enabled
-        entries = [e for e in entries if enabled(e)]
+        if energy:
+            entries = [e for e in entries if energy_enabled(e)]
         if len(entries) != 1:
-            label = ("household energy estimation" if energy
-                     else "advanced tado X controls")
             raise ServiceValidationError(
-                f"Select a loaded tado X home with {label} enabled "
-                "under Settings → Devices & services → tado → Configure"
+                "Select exactly one loaded tado X home"
+                + (" with household Vaillant energy estimation enabled "
+                   "under Settings → Devices & services → tado → Configure"
+                   if energy else "")
             )
         return entries[0].runtime_data.coordinator
 
