@@ -307,10 +307,10 @@ class AllocationTests(unittest.TestCase):
         monthly={allocation._stat_id(self.main,"101"):[
             {"start":stamp(m,1),"sum":m*100} for m in range(1,8)]}
         hourly={allocation._stat_id(self.main,"101"):[
-            {"start":stamp(1,9),"sum":0},
+            {"start":datetime(2025,1,9,23,tzinfo=tz).timestamp(),"sum":0},
             {"start":stamp(1,10),"sum":5},
-            {"start":stamp(7,1),"sum":5},
-            {"start":stamp(7,2),"sum":8},
+            {"start":datetime(2025,6,30,23,tzinfo=tz).timestamp(),"sum":5},
+            {"start":stamp(7,1),"sum":8},
         ]}
         queried=[]
         async def fetch(hass,start,end,ids,period="hour"):
