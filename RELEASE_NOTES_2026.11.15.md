@@ -56,6 +56,15 @@ Only the configuration checkbox
 The integration options show one checkbox under
 **Settings → Devices & services → tado → Configure**.
 
+The repository now has **two distinct dashboard templates**:
+- `examples/heating_dashboard.yaml` — generic tado X Overview and Schedules,
+  with no Vaillant or installed-radiator assumptions.
+- `examples/heating_dashboard_household_vaillant.yaml` — optional home
+  implementation with Vaillant/myPyllant consumption and rated radiator
+  inventory, meant only for homes explicitly enabling that feature.
+
+Existing dashboards in Home Assistant are never rewritten by the update.
+
 ### Existing installation migration
 
 The integration config-entry version advances from 2 to 3. Existing homes
