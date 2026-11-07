@@ -42,5 +42,5 @@ jobs:
           fi
           gh release create "v$VERSION" \
             --target "$VALIDATED_SHA" \
-            --title "tado X v$VERSION — self-updating frontend loader" \
+            --title "tado X v$VERSION — interactive chart tooltips" \
             --notes-file "RELEASE_NOTES_$VERSION.md"

@@ -2,6 +2,7 @@ const xhTag=name=>name+"-v"+(new URL(import.meta.url).searchParams.get("v")||"de
 const XH_CARD_ASSET_VERSION=encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev");
 const {xhPresetRange}=await import("./x-date-range-picker.js?v="+XH_CARD_ASSET_VERSION);
 await import("./x-connectivity-status.js?v="+XH_CARD_ASSET_VERSION);
+const {attachRecorderChartTooltip}=await import("./x-chart-hover-tooltip.js?v="+XH_CARD_ASSET_VERSION);
 /* Long-term tado X settings chart, using locally recorded HA statistics.
  * Detects entities from their unique suffixes, no hard-coded home-specific IDs.
  * Built-in number/switch/select more-info dialog provides editing controls.
@@ -260,6 +261,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       }
     }
     wrap.append(svg);
+    attachRecorderChartTooltip(wrap,svg,
+      visible.map(item=>({label:item.src.title,color:item.src.color,points:item.rows})),
+      {start:minTime,end:maxTime,width,height,left,right,top,bottom,yFor:yp,
+        period:(maxTime-minTime)<=2*86400000?"hour":
+          (maxTime-minTime)<=92*86400000?"day":"month",unit:"°C"});
     const outside=this._outdoorId();
     const source=outside?
       (this._hass.states[outside]?.attributes?.friendly_name||outside)+" ("+outside+")":

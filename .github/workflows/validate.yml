@@ -27,6 +27,8 @@ jobs:
           done
       - name: Test dashboard loader and hot-swap logic
         run: node tests/test_frontend_loader.cjs
+      - name: Test interactive chart tooltip
+        run: node tests/test_chart_hover_tooltip.cjs custom_components/tado/www/x-chart-hover-tooltip.js
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
@@ -35,7 +37,7 @@ jobs:
           base = Path('custom_components/tado')
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
-          assert manifest['version']=='2026.11.23'
+          assert manifest['version']=='2026.11.24'
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY
