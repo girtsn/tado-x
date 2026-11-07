@@ -225,6 +225,7 @@ class TadoXRoomCapacityNumber(TadoZoneEntity, NumberEntity):
         report = radiator_capacity_report(
             self.coordinator.zones,
             self.coordinator.config_entry.options.get("x_capacity_kw", {}),
+            self.coordinator.config_entry.options.get("x_radiator_room_mapping", {}),
         )
         return next(row for row in report["rooms"]
                     if str(row["room_id"]) == self._room_id)
