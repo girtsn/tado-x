@@ -122,6 +122,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
         const track=this._el("div",null,"track"),bar=this._el("div",null,"bar");
         bar.style.width=Math.max(0,100*value/max)+"%";track.append(bar);row.append(track);
         row.append(this._el("span",this._fmt(value)+" kWh","value"));
+        row.title=name+": "+this._fmt(value)+" kWh";
         card.append(row);
       }
       card.append(this._el("div","Trends in estimated total heating-gas input","head"));
@@ -131,7 +132,13 @@ class TadoXHeatingEnergyCard extends HTMLElement {
       periods.forEach((row,index)=>{
         const el=this._el("div",null,"trendbar");
         el.style.height=Math.max(2,72*vals[index]/vmax)+"px";
-        el.title=row.period+": "+this._fmt(vals[index])+" kWh";
+        const parts=this._data.rooms.map(name=>[name,Number(row[name])||0])
+          .filter(([,amount])=>amount>0).sort((a,b)=>b[1]-a[1]);
+        const details=row.period+": "+this._fmt(vals[index])+" kWh total"+
+          "\\n"+parts.map(([name,amount])=>name+": "+this._fmt(amount)+" kWh").join("\\n");
+        el.title=details;
+        el.setAttribute("aria-label",details);
+        el.setAttribute("tabindex","0");
         timeline.append(el);
       });card.append(timeline);
       card.append(this._el("p",periods[0].period+" to "+periods[periods.length-1].period,"muted"));
