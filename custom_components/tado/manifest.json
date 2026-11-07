@@ -4,6 +4,7 @@
   "name": "Tado",
   "codeowners": ["@erwindouna"],
   "config_flow": true,
+  "dependencies": ["frontend", "http"],
   "dhcp": [
     {
       "hostname": "tado*"
