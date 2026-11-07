@@ -6,8 +6,15 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     super();this.attachShadow({mode:"open"});
     this._hass=null;this._cfg={};this._loaded=false;this._period="month";
     this._busy=false;this._data=null;this._message="";
+    this._dateRange=null;this._requestId=0;
   }
   setConfig(config){this._cfg=config||{};this._render();}
+  set dateRange(range){
+    if(!range || (this._dateRange?.start===range.start &&
+                   this._dateRange?.end===range.end))return;
+    this._dateRange=range;
+    if(this._loaded)this._reload();
+  }
   set hass(value){
     this._hass=value;
     if(!this._loaded&&value){this._loaded=true;this._reload();}
@@ -22,13 +29,20 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     return result?.response??result;
   }
   async _reload(){
-    if(this._busy)return;
+    if(!this._hass)return;
+    const request=++this._requestId;
     this._busy=true;this._render();
     try{
-      this._data=await this._call("x_heating_allocation_history",{period:this._period});
-      this._message="";
-    }catch(e){this._message="Unable to load statistics: "+(e?.message||e);}
-    finally{this._busy=false;this._render();}
+      const args={period:this._period};
+      if(this._dateRange){
+        args.start_time=this._dateRange.start;
+        args.end_time=this._dateRange.end;
+      }
+      const data=await this._call("x_heating_allocation_history",args);
+      if(request===this._requestId){this._data=data;this._message="";}
+    }catch(e){if(request===this._requestId)
+      this._message="Unable to load statistics: "+(e?.message||e);
+    }finally{if(request===this._requestId){this._busy=false;this._render();}}
   }
   async _compute(){
     if(this._busy)return;
@@ -77,8 +91,10 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     root.append(css);const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Estimated gas heating by room"));
     const actions=this._el("div",null,"actions");
-    for(const [key,label] of [["day","24 hours"],["week","Week"],["month","Month"],["year","Year"],["3years","3 years"]]){
-      actions.append(this._button(label,()=>{this._period=key;this._reload();},this._period===key));
+    if(!this._cfg.shared_date_range){
+      for(const [key,label] of [["day","24 hours"],["week","Week"],["month","Month"],["year","Year"],["3years","3 years"]]){
+        actions.append(this._button(label,()=>{this._period=key;this._reload();},this._period===key));
+      }
     }
     actions.append(this._button("Refresh",()=>this._reload()));
     actions.append(this._button("Update estimates",()=>this._compute()));
