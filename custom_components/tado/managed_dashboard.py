@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from homeassistant.components import frontend
 from homeassistant.components.lovelace import LOVELACE_DATA, MODE_STORAGE, dashboard
-from homeassistant.components.lovelace.const import CONF_URL_PATH
+from homeassistant.components.lovelace.const import ConfigNotFound
 
 from .manifest_version import INTEGRATION_VERSION
 
@@ -89,52 +89,52 @@ async def _sync_resources(hass, lovelace_data) -> bool:
 
 
 async def _ensure_managed_dashboard(hass, lovelace_data) -> str:
-    """Create a separate strategy dashboard once; never edit a user's cards.
+    """Register an integration-owned Lovelace sidebar panel.
 
-    Home Assistant's Lovelace storage has dashboard metadata in one
-    collection, but the runtime dashboard mapping is not itself exposed as
-    the collection. When creating a new dashboard after HA startup, create
-    the metadata, register the Lovelace panel and save the initial strategy.
-    Subsequent startups load this storage dashboard through HA normally.
+    Important: do NOT create another DashboardsCollection instance to edit
+    Home Assistant's .storage/lovelace_dashboards. The live core collection
+    retains its own in-memory snapshot, and a second instance could cause
+    later user dashboard edits to overwrite the newly created metadata.
+
+    Instead install a dedicated Lovelace panel and attach an independent
+    strategy-backed LovelaceStorage at a stable path. The user's ordinary
+    dashboard collection is never written. An existing panel/path (including
+    the user's hand-managed /heating) is always preserved.
     """
     url = MANAGED_DASHBOARD_PATH
     if url in lovelace_data.dashboards or frontend.async_panel_exists(hass, url):
-        # Existing dashboard at the same path is wholly user-owned. If it
-        # uses our strategy, its layout still updates with the JS resource.
         return "existing_preserved"
 
-    collection = dashboard.DashboardsCollection(hass)
-    await collection.async_load()
-    # Avoid overwriting collisions in stored metadata even if a panel is not
-    # currently visible/registered.
-    for item in collection.async_items():
-        if item.get(CONF_URL_PATH) == url:
-            return "existing_preserved"
-
-    item = await collection.async_create_item({
+    # The storage key is private to this tado-managed panel. The strategy
+    # config is seeded only on first use; a user's "Take control" edit is
+    # never overwritten by a future integration update.
+    config = {
+        "id": "tado-x-heating-managed",
         "url_path": url,
         "title": "tado X Heating",
         "icon": "mdi:radiator",
         "show_in_sidebar": True,
         "require_admin": False,
-    })
-    managed = dashboard.LovelaceStorage(hass, item)
-    lovelace_data.dashboards[url] = managed
+    }
+    managed = dashboard.LovelaceStorage(hass, config)
     try:
+        try:
+            await managed.async_load(False)
+        except ConfigNotFound:
+            await managed.async_save(STRATEGY)
+
+        lovelace_data.dashboards[url] = managed
         frontend.async_register_built_in_panel(
             hass, "lovelace", frontend_url_path=url,
             sidebar_title="tado X Heating", sidebar_icon="mdi:radiator",
             show_in_sidebar=True, require_admin=False,
             config={"mode": MODE_STORAGE},
         )
-        await managed.async_save(STRATEGY)
     except Exception:
-        # The storage collection retains a metadata entry; next startup
-        # Lovelace will load it normally. Never affect other dashboards.
-        _LOGGER.exception("Could not initialize managed tado X dashboard")
+        lovelace_data.dashboards.pop(url, None)
+        _LOGGER.exception("Could not register integration-owned tado X dashboard")
         return "creation_incomplete"
-    return "created"
-
+    return "registered"
 
 async def async_install_managed_dashboard(hass) -> dict[str, str]:
     """Install the resource and managed dashboard after Lovelace is ready.
