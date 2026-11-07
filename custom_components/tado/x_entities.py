@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.components.select import SelectEntity
 from homeassistant.const import UnitOfTemperature
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -156,46 +155,6 @@ class TadoXAdaptedFlowSensor(TadoXSettingsEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return {"meaning": "tado-calculated maximum (not measured boiler flow)"}
-
-
-class TadoXDhwModeSelect(TadoXSettingsEntity, SelectEntity):
-    """Select tado X DHW Auto (resume), boost ON, or force OFF."""
-
-    _attr_name = "DHW operating mode"
-    _attr_icon = "mdi:water-boiler"
-    _attr_options = ["Auto", "On", "Off"]
-
-    def __init__(self, settings, main):
-        super().__init__(settings, main, "dhw_operating_mode")
-
-    @property
-    def available(self):
-        state = self._item("dhw.state")
-        return super().available and isinstance(state, str) and state.upper() != "NONE"
-
-    @property
-    def current_option(self):
-        value = self._item("dhw.state")
-        if not isinstance(value, str):
-            return None
-        value = value.upper()
-        if value.startswith("SCHEDULE"):
-            return "Auto"
-        if value.endswith("_ON") or value == "ON":
-            return "On"
-        if value.endswith("_OFF") or value == "OFF":
-            return "Off"
-        return None
-
-    async def async_select_option(self, option):
-        api = TadoXClient(self._main)
-        if option == "Auto":
-            await api.dhw_resume()
-        elif option in ("On", "Off"):
-            await api.dhw_boost(option.upper())
-        else:
-            raise ValueError("Unsupported DHW mode")
-        await self.coordinator.async_request_refresh()
 
 
 class TadoXRoomCapacityNumber(TadoZoneEntity, NumberEntity):
