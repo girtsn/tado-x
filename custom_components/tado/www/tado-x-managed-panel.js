@@ -7,13 +7,8 @@
  * Versioning only the entry module leaves its static imports cached.
  */
 const XH_ASSET_VERSION=new URL(import.meta.url).searchParams.get("v")||"dev";
-const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(XH_ASSET_VERSION));
-await import("./x-connectivity-status.js?v="+encodeURIComponent(XH_ASSET_VERSION));
-await Promise.all([
-  import("./x-settings-history-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
-  import("./x-schedule-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
-  import("./x-heating-energy-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
-]);
+// Register the panel synchronously: asynchronous assets must never blank the sidebar.
+let xhPresetRange=null;
 
 class TadoXManagedHeatingPanel extends HTMLElement {
   constructor(){
@@ -26,11 +21,20 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     this._cards=[];
     this._lastEnergy=null;
     this._initialized=false;
-    this._dateRange=xhPresetRange("week");
+    this._dateRange=null;
+    this._assetsReady=false;
+    this._assetsError="";
+    this._assetPromise=null;
+    this._assetRetries=0;
     this._connectionStatus=null;
   }
   set hass(value){
     this._hass=value;
+    if(!this._assetsReady){
+      this._ensureAssets();
+      this._render();
+      return;
+    }
     if(!this._initialized && value){
       this._render();
     }else{
@@ -51,7 +55,15 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     // reload once so the new manifest-versioned JS is loaded automatically.
     if(oldVersion && value?.config?.integration_version &&
        oldVersion!==value.config.integration_version){
-      window.location.reload();return;
+      // Reload only once per installed version, not on each HA panel refresh.
+      const key="tado-x-panel-reload-"+value.config.integration_version;
+      try{
+        if(window.sessionStorage.getItem(key)!=="1"){
+          window.sessionStorage.setItem(key,"1");
+          window.location.reload();return;
+        }
+      }catch(_err){/* Avoid a loop if session storage is restricted. */}
+      this._assetsError="Heating panel updated. Reopen this tab if the old panel persists.";
     }
     if(this._hass && oldId!==value?.config?.config_entry)this._render();
   }
@@ -65,7 +77,56 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     }
   }
   connectedCallback(){
+    this._ensureAssets();
     if(this._hass && !this._initialized)this._render();
+  }
+  _ensureAssets(){
+    if(this._assetsReady||this._assetPromise||!this.isConnected)return;
+    this._assetsError="";
+    const version=encodeURIComponent(XH_ASSET_VERSION);
+    const retry=this._assetRetries?"&retry="+this._assetRetries:"";
+    this._assetPromise=(async()=>{
+      // The component has already been defined, so failed modules show an
+      // actionable loading error instead of leaving the page empty.
+      const picker=await import("./x-date-range-picker.js?v="+version+retry);
+      await Promise.all([
+        import("./x-connectivity-status.js?v="+version+retry),
+        import("./x-settings-history-card.js?v="+version+retry),
+        import("./x-schedule-card.js?v="+version+retry),
+        import("./x-heating-energy-card.js?v="+version+retry),
+      ]);
+      xhPresetRange=picker.xhPresetRange;
+      if(typeof xhPresetRange!=="function")
+        throw new Error("Date picker did not export xhPresetRange");
+      this._dateRange??=xhPresetRange("week");
+      this._assetsReady=true;
+    })().catch(err=>{
+      this._assetsError="Could not load Heating dashboard modules (version "+
+        XH_ASSET_VERSION+"): "+(err?.message||String(err));
+    }).finally(()=>{
+      this._assetPromise=null;
+      if(this.isConnected&&this._hass)this._render();
+    });
+  }
+  _renderAssetStatus(){
+    const root=this.shadowRoot;
+    root.replaceChildren();
+    const container=this._element("div");
+    container.style.cssText="padding:24px;font:inherit;color:var(--primary-text-color)";
+    container.append(this._element("h2","tado X Heating"));
+    container.append(this._element("p",this._assetsError||
+      "Loading Heating dashboard modules…"));
+    if(this._assetsError){
+      const retry=this._element("button","Retry loading");
+      retry.type="button";
+      retry.addEventListener("click",()=>{
+        this._assetRetries++;
+        this._ensureAssets();
+        this._renderAssetStatus();
+      });
+      container.append(retry);
+    }
+    root.append(container);
   }
   _energyEnabled(){
     if(!this._hass)return false;
@@ -104,6 +165,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   _render(){
     if(!this._hass || !this.isConnected)return;
+    if(!this._assetsReady){this._renderAssetStatus();return;}
     const enabled=this._energyEnabled();
     this._lastEnergy=enabled;
     this._initialized=true;
