@@ -177,6 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 config={
                     "config_entry": entry.entry_id,
                     "home_id": str(coordinator.home_id),
+                    "integration_version": INTEGRATION_VERSION,
                 },
                 require_admin=False,
             )
