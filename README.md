@@ -1,5 +1,14 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.20 — keep private Home Assistant automations outside HACS
+
+Removed the household-specific device availability email automation from
+`examples/`. This integration exposes generic cloud connectivity diagnostic
+entities and its own dashboard status view, but does not distribute or modify
+private device-monitoring automations. Configure notifications separately in
+your own private Home Assistant configuration. This is a packaging/privacy
+change only; no heating control or polling logic has changed.
+
 ## v2026.11.19 — cloud API connectivity and stale-update detection
 
 Read-only **tado X API cloud connection state**, **tado X settings cloud
@@ -14,13 +23,9 @@ tabs; the standalone heating-history card includes the same status strip.
 These status indicators use only Home Assistant state and do not poll the
 tado cloud from the browser.
 
-Update through HACS and restart Home Assistant. To add offline/recovered
-email alerts, **replace the existing Home Assistant automation manually**
-with [examples/device_availability_dynamic_email.yaml](examples/device_availability_dynamic_email.yaml).
-The example preserves the existing Foscam/TV exclusions, 5-minute delay,
-and recovery-only-after-outage logic, while monitoring *both* tado API
-sensors even though they share one device. The HACS integration cannot
-change user-owned Home Assistant automations automatically.
+Update through HACS and restart Home Assistant. Cloud connectivity sensors
+are intended for user-defined, locally stored automations. The HACS
+integration cannot create or modify your private notification configuration.
 
 The diagnostic sensors can report cloud loss while HA is running and the
 integration has completed its initial setup. An outage that prevents the
