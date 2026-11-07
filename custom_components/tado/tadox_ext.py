@@ -8,7 +8,7 @@ explicit Home Assistant service/entity action, never during polling.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -284,6 +284,8 @@ class TadoXSettingsCoordinator(DataUpdateCoordinator):
                          update_interval=X_POLL_INTERVAL)
         self.client = TadoXClient(main)
         self.data = {"dhw": None, "flow": None}
+        self.last_successful_update = None
+        self.last_failure_reason = None
 
     async def _async_update_data(self):
         snapshot = dict(self.data or {"dhw": None, "flow": None})
@@ -291,5 +293,8 @@ class TadoXSettingsCoordinator(DataUpdateCoordinator):
             snapshot["dhw"] = await self.client.get_dhw()
             snapshot["flow"] = await self.client.get_flow()
         except Exception as exc:
+            self.last_failure_reason = f"{type(exc).__name__}: {str(exc)[:180]}"
             raise UpdateFailed("Unable to retrieve tado X settings") from exc
+        self.last_successful_update = datetime.now(timezone.utc)
+        self.last_failure_reason = None
         return snapshot

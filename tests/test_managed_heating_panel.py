@@ -62,6 +62,38 @@ class ManagedHeatingPanelTests(unittest.TestCase):
             self.assertNotIn('XH_PERIODS', source)
         self.assertIn('/tado/x-date-range-picker.js', (TADO / '__init__.py').read_text())
 
+    def test_independent_tado_x_cloud_health_and_dashboard_status(self):
+        binary = (TADO / "binary_sensor.py").read_text()
+        sensor = (TADO / "sensor.py").read_text()
+        main = (TADO / "coordinator.py").read_text()
+        extra = (TADO / "tadox_ext.py").read_text()
+        panel = (TADO / "www" / "tado-x-managed-panel.js").read_text()
+        history = (TADO / "www" / "tado-x-settings-history-card.js").read_text()
+        strip = (TADO / "www" / "tado-x-connectivity-status.js").read_text()
+        automation = (ROOT / "examples" / "device_availability_dynamic_email.yaml").read_text()
+
+        for scope in ("main_api", "settings_api"):
+            self.assertIn(f'"{scope}"', binary)
+        self.assertIn('class TadoXCloudConnectionBinarySensor', binary)
+        self.assertIn('def available(self) -> bool:', binary)
+        self.assertIn('return True', binary)
+        self.assertIn('source.last_update_success', binary)
+        self.assertIn('async_track_time_interval', binary)
+        self.assertIn('self._source.async_add_listener', binary)
+        self.assertIn('stale_timeout_minutes', binary)
+        self.assertIn('last_successful_update = datetime.now(timezone.utc)', main)
+        self.assertIn('last_successful_update = datetime.now(timezone.utc)', extra)
+        self.assertIn('class TadoXLastSuccessfulUpdateSensor', sensor)
+        self.assertIn('SensorDeviceClass.TIMESTAMP', sensor)
+        self.assertIn('tado-x-connectivity-status', panel)
+        self.assertIn('tado-x-connectivity-status', history)
+        self.assertIn('connectivity_scope', strip)
+        self.assertIn('date-range-changed', panel)
+        self.assertIn('eid == ns.best or tado_api', automation)
+        self.assertIn('monitor_scope', automation)
+        self.assertIn('delay: "00:05:00"', automation)
+        self.assertIn('notify.email_girts', automation)
+
     def test_only_one_vaillant_option_not_advanced_tado_switches(self):
         flow = (TADO / "config_flow.py").read_text()
         self.assertIn("CONF_X_HOME_ENERGY", flow)

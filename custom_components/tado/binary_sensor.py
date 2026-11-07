@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -13,6 +14,8 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -208,7 +211,88 @@ async def async_setup_entry(
         # options directly; it CAN read this binary sensor. This is not a
         # configuration switch and never changes the option.
         entities.append(TadoXVaillantEnergyEnabledBinarySensor(tado, entry))
+        entities.extend([
+            TadoXCloudConnectionBinarySensor(tado, "main_api"),
+            TadoXCloudConnectionBinarySensor(tado, "settings_api"),
+        ])
     async_add_entities(entities, True)
+
+
+
+class TadoXCloudConnectionBinarySensor(TadoHomeEntity, BinarySensorEntity):
+    """Cloud health stays available even when the coordinator is offline.
+
+    A local 60-second watchdog catches stalled polling without extra API calls.
+    These flags describe tado cloud access, not individual radiator radio links.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, main, scope: str):
+        super().__init__(main)
+        self._scope = scope
+        self._source = main if scope == "main_api" else main.x_settings
+        self._attr_unique_id = f"{main.home_id}_x_{scope}_cloud_connection_state"
+        if scope == "main_api":
+            self._attr_name = "tado X API cloud connection state"
+            self.entity_id = "binary_sensor.tado_x_api_cloud_connection_state"
+            self._max_age = timedelta(minutes=15)
+        else:
+            self._attr_name = "tado X settings cloud connection state"
+            self.entity_id = "binary_sensor.tado_x_settings_cloud_connection_state"
+            self._max_age = timedelta(minutes=95)
+
+    @property
+    def available(self) -> bool:
+        """Remain readable on a failed or timed-out API poll."""
+        return True
+
+    @property
+    def is_on(self) -> bool:
+        source = self._source
+        updated = source.last_successful_update if source else None
+        return bool(
+            source and source.last_update_success and updated is not None
+            and timedelta(0) <= datetime.now(timezone.utc) - updated < self._max_age
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        source = self._source
+        updated = source.last_successful_update if source else None
+        stale = updated is None or datetime.now(timezone.utc) - updated >= self._max_age
+        if source is None:
+            reason = "Settings coordinator not initialized"
+        elif not source.last_update_success:
+            reason = source.last_failure_reason or "Most recent API poll failed"
+        elif stale:
+            reason = "No successful API poll within the expected interval"
+        else:
+            reason = None
+        return {
+            "connectivity_scope": self._scope,
+            "tado_home_id": str(self.coordinator.home_id),
+            "read_only": True,
+            "failure_reason": reason,
+            "last_successful_update": updated.isoformat() if updated else None,
+            "stale_timeout_minutes": int(self._max_age.total_seconds() // 60),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self._source is not None and self._source is not self.coordinator:
+            self.async_on_remove(
+                self._source.async_add_listener(self._handle_coordinator_update)
+            )
+
+        @callback
+        def refresh_watchdog(now) -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_time_interval(self.hass, refresh_watchdog, timedelta(minutes=1))
+        )
 
 
 class TadoXVaillantEnergyEnabledBinarySensor(TadoHomeEntity, BinarySensorEntity):

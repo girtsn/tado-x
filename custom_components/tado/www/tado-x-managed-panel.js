@@ -8,6 +8,7 @@
  */
 const XH_ASSET_VERSION=new URL(import.meta.url).searchParams.get("v")||"dev";
 const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(XH_ASSET_VERSION));
+await import("./x-connectivity-status.js?v="+encodeURIComponent(XH_ASSET_VERSION));
 await Promise.all([
   import("./x-settings-history-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
   import("./x-schedule-card.js?v="+encodeURIComponent(XH_ASSET_VERSION)),
@@ -26,6 +27,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     this._lastEnergy=null;
     this._initialized=false;
     this._dateRange=xhPresetRange("week");
+    this._connectionStatus=null;
   }
   set hass(value){
     this._hass=value;
@@ -37,6 +39,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
         this._render();
       }else{
         for(const card of this._cards)card.hass=value;
+        if(this._connectionStatus)this._connectionStatus.hass=value;
       }
     }
   }
@@ -85,7 +88,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   _card(type,title){
     const el=document.createElement(type);
     el.setConfig({title,config_entry:this._panel?.config?.config_entry,
-      shared_date_range:this._tab==="overview"});
+      shared_date_range:this._tab==="overview",
+      shared_connection_status:true});
     if(this._tab==="overview")el.dateRange=this._dateRange;
     el.hass=this._hass;
     this._cards.push(el);
@@ -104,6 +108,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     this._lastEnergy=enabled;
     this._initialized=true;
     this._cards=[];
+    this._connectionStatus=null;
     const root=this.shadowRoot;root.replaceChildren();
     const style=this._element("style");
     style.textContent=[
@@ -143,6 +148,10 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       tabs.append(button);
     }
     shell.append(tabs);
+    this._connectionStatus=this._element("tado-x-connectivity-status");
+    this._connectionStatus.homeId=this._panel?.config?.home_id;
+    this._connectionStatus.hass=this._hass;
+    shell.append(this._connectionStatus);
 
     if(this._tab==="overview"){
       const picker=this._element("tado-x-date-range-picker");

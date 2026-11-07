@@ -1,4 +1,6 @@
-const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
+const XH_CARD_ASSET_VERSION=encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev");
+const {xhPresetRange}=await import("./x-date-range-picker.js?v="+XH_CARD_ASSET_VERSION);
+await import("./x-connectivity-status.js?v="+XH_CARD_ASSET_VERSION);
 /* Long-term tado X settings chart, using locally recorded HA statistics.
  * Detects entities from their unique suffixes, no hard-coded home-specific IDs.
  * Built-in number/switch/select more-info dialog provides editing controls.
@@ -393,6 +395,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     root.append(style);
     const card=this._el("ha-card");
     card.append(this._el("h2",this._cfg.title||"Heating flow and hot water"));
+    if(!this._cfg.shared_connection_status && this._hass){
+      const health=this._el("tado-x-connectivity-status");
+      health.hass=this._hass;
+      card.append(health);
+    }
     card.append(this._el("div","Heating flow optimisation","section-head"));
     const flow=this._el("div",null,"controls");
     const maxflow=XH_SOURCES.find(x=>x.id==="maxflow");

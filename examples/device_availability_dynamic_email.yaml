@@ -1,0 +1,204 @@
+# Paste into an existing automation in Home Assistant's YAML editor.
+# It monitors one representative entity per device AND all tado X cloud
+# API diagnostic sensors, which share the same tado-home device.
+# Replaces the original "Device availability - dynamic email" automation.
+alias: Device availability - dynamic email
+description: >-
+  Notify after 5 minutes of device unavailability or explicit cloud/API
+  connectivity loss. Monitor both tado X APIs even on the same registered
+  device. Recovery messages are sent only after an offline notification.
+  Excludes Foscam and LG TVs.
+triggers:
+  - trigger: event
+    event_type: state_changed
+conditions:
+  - condition: template
+    value_template: >-
+      {% set eid = trigger.event.data.entity_id | default('', true) %}
+      {% set old = trigger.event.data.old_state %}
+      {% set new = trigger.event.data.new_state %}
+      {% set excluded = [
+        'switch.foscam_entrance', 'switch.foscam_yard'
+      ] %}
+      {% set ignored_tv_devices = [
+        device_id('media_player.oled55c56lb_deuqljp7144'),
+        device_id('media_player.lg_webos_tv_oled77c46la_3'),
+        device_id('media_player.lg_webos_tv_oled77c46la_2')
+      ] %}
+      {% set did = device_id(eid) if eid else none %}
+      {% set name = device_name(did) if did else '' %}
+      {% set domains = [
+        'camera', 'light', 'climate', 'switch',
+        'binary_sensor', 'sensor', 'media_player',
+        'alarm_control_panel'
+      ] %}
+      {% set ns = namespace(best='', score=9999) %}
+      {% if did and did not in ignored_tv_devices
+            and eid not in excluded
+            and name not in ['foscam-entrance', 'foscam-yard'] %}
+        {% for candidate in device_entities(did) %}
+          {% set domain = candidate.split('.')[0] %}
+          {% if domain in domains and candidate not in excluded %}
+            {% set is_cloud = domain == 'binary_sensor'
+               and 'cloud_connection_state' in candidate %}
+            {% set bad =
+              'firmware' in candidate
+              or 'update' in candidate
+              or 'identify' in candidate
+              or 'battery' in candidate
+              or 'child_lock' in candidate
+              or candidate.endswith('_led')
+              or 'restart' in candidate
+              or ('volume' in candidate
+                  and not candidate.endswith('_status')
+                  and domain != 'media_player')
+              or 'diagnostic' in candidate
+              or candidate.startswith('switch.automation_')
+              or ('connectivity' in candidate
+                  and 'tado' not in candidate
+                  and not is_cloud)
+            %}
+            {% if not bad %}
+              {% set score = domains.index(domain) * 100 %}
+              {% if is_cloud %}
+                {% set score = 0 %}
+              {% elif domain == 'binary_sensor'
+                    and ('connection_state' in candidate
+                         or 'connectivity' in candidate) %}
+                {% set score = 1 %}
+              {% elif domain == 'binary_sensor'
+                    and candidate.startswith('binary_sensor.hue_')
+                    and candidate.endswith('_motion') %}
+                {% set score = 2 %}
+              {% elif domain == 'sensor'
+                    and ('_state' in candidate
+                         or '_status' in candidate) %}
+                {% set score = 40 %}
+              {% endif %}
+              {% if domain == 'switch' and 'unifi_' in candidate %}
+                {% set score = score + 80 %}
+              {% endif %}
+              {% if domain == 'switch'
+                    and ('_enabled' in candidate
+                         or 'analytics' in candidate) %}
+                {% set score = score + 150 %}
+              {% endif %}
+              {% if name == 'unifi-dmp'
+                    and candidate.startswith('alarm_control_panel.') %}
+                {% set score = 0 %}
+              {% endif %}
+              {% if score < ns.score
+                    or (score == ns.score and candidate < ns.best) %}
+                {% set ns.best = candidate %}
+                {% set ns.score = score %}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      {% set tado_api =
+        eid.startswith('binary_sensor.')
+        and state_attr(eid, 'connectivity_scope')
+            in ['main_api', 'settings_api']
+        and state_attr(eid, 'tado_home_id') is not none
+      %}
+      {% set is_cloud =
+        eid.startswith('binary_sensor.')
+        and ('cloud_connection_state' in eid or tado_api)
+      %}
+      {% set normal_outage =
+        not is_cloud
+        and new is not none
+        and new.state == 'unavailable'
+        and (old is none or old.state != 'unavailable')
+      %}
+      {% set cloud_outage =
+        is_cloud
+        and new is not none
+        and new.state in ['off', 'unknown', 'unavailable']
+        and (old is none
+             or old.state not in ['off', 'unknown', 'unavailable'])
+      %}
+      {{ did
+         and did not in ignored_tv_devices
+         and eid not in excluded
+         and name not in ['foscam-entrance', 'foscam-yard']
+         and (eid == ns.best or tado_api)
+         and (normal_outage or cloud_outage) }}
+actions:
+  - variables:
+      monitored_entity: "{{ trigger.event.data.entity_id }}"
+      monitored_device: >-
+        {{ device_name(device_id(trigger.event.data.entity_id))
+           or trigger.event.data.entity_id }}
+      monitored_area: >-
+        {{ area_name(device_id(trigger.event.data.entity_id))
+           or 'Unassigned' }}
+      monitor_connectivity: >-
+        {{ trigger.event.data.entity_id.startswith('binary_sensor.')
+           and ('cloud_connection_state' in trigger.event.data.entity_id
+             or state_attr(trigger.event.data.entity_id, 'connectivity_scope')
+               in ['main_api', 'settings_api']) }}
+      monitor_scope: >-
+        {{ state_attr(trigger.event.data.entity_id, 'connectivity_scope')
+           or 'device' }}
+  - delay: "00:05:00"
+  - condition: template
+    value_template: >-
+      {% if monitor_connectivity | bool %}
+        {{ states(monitored_entity) in ['off', 'unknown', 'unavailable'] }}
+      {% else %}
+        {{ states(monitored_entity) == 'unavailable' }}
+      {% endif %}
+  - action: notify.send_message
+    target:
+      entity_id: notify.email_girts
+    data:
+      title: "[HASS] OFFLINE: {{ monitored_device }}{{ ' / ' ~ monitor_scope if monitor_scope in ['main_api', 'settings_api'] else '' }}"
+      message: >-
+        Device: {{ monitored_device }}
+
+        Area: {{ monitored_area }}
+
+        Entity: {{ monitored_entity }}
+
+        State: {{ states(monitored_entity) }}
+
+        Problem: {{ 'Cloud API connection failed or stale'
+          if monitor_connectivity | bool else 'Device entity unavailable' }}
+
+        {% if monitor_connectivity | bool %}
+        Failure reason: {{ state_attr(monitored_entity, 'failure_reason')
+          or 'Not provided' }}
+
+        Last successful update: {{ state_attr(monitored_entity,
+          'last_successful_update') or 'Not provided' }}
+        {% endif %}
+
+        Time: {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+  - wait_template: >-
+      {% if monitor_connectivity | bool %}
+        {{ is_state(monitored_entity, 'on') }}
+      {% else %}
+        {{ states(monitored_entity) not in ['unavailable', 'unknown'] }}
+      {% endif %}
+  - action: notify.send_message
+    target:
+      entity_id: notify.email_girts
+    data:
+      title: "[HASS] RECOVERED: {{ monitored_device }}{{ ' / ' ~ monitor_scope if monitor_scope in ['main_api', 'settings_api'] else '' }}"
+      message: >-
+        Device: {{ monitored_device }}
+
+        Area: {{ monitored_area }}
+
+        Entity: {{ monitored_entity }}
+
+        State: {{ states(monitored_entity) }}
+
+        Connection: {{ 'Cloud API restored'
+          if monitor_connectivity | bool else 'Device entity available again' }}
+
+        Time: {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+mode: parallel
+max: 200
