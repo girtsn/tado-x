@@ -1,6 +1,37 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.15 — tado X for everyone; household Vaillant features opt-in
+
+**All tado X controls remain available to every tado X user without enabling
+a switch**: hot-water target, flow-temperature settings/history, room schedule
+editor, room manual-override state, whole-home Heating Off/Resume/Eco Boost/
+Top Boost and persisted 30-minute boost recovery.
+
+After any whole-home action, its timed recovery, or saving a room heating
+schedule, the coordinator queues a **3-second delayed readback of all room
+states**, updating the Heating dashboard without waiting for the regular
+5-minute poll. The readback consumes normal tado API requests once, and rapid
+actions are coalesced.
+
+Only **Household-specific Vaillant/myPyllant gas allocation and installed
+radiator inventory** is optional, disabled by default for new installations.
+Enable it under **Settings → Devices & services → tado → Configure**.
+Existing homes with recorded radiator-weighted allocation statistics are
+automatically recognised and have the option preserved. Other installations
+need not have myPyllant installed and no Vaillant allocation runs unless this
+single option is enabled.
+
+The custom dashboard energy card is an optional resource. Its Vaillant data
+and hardcoded physical inventory are not relevant to other households.
+The included physical radiator data is nevertheless present in this public
+repository; opting out hides the runtime feature, not its source.
+
+The built-in dashboard cards have not changed in this release; previous
+registered JavaScript resources still work without cache busting.
+
+
+
 ## v2026.11.14 — live tado X schedule-mode detection
 
 The **Heating home mode** sensor and Overview indicator now use the ten actual
