@@ -125,6 +125,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
 
     coordinator = TadoDataUpdateCoordinator(hass, entry, tado)
     await coordinator.async_config_entry_first_refresh()
+    entry.async_on_unload(coordinator.cancel_post_action_room_refresh)
 
     # Preserve the original household's existing Vaillant allocations on
     # upgrade, without activating hard-coded radiator extras for other homes.
