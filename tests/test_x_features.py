@@ -1,4 +1,4 @@
-"""Offline regression for the two opt-in tado X feature families.
+"""Offline regression for optional household energy feature.
 
 Use isolated fake package modules: this does not import Home Assistant,
 PyTado or touch a live heating system.
@@ -16,7 +16,6 @@ pkg.__path__ = []
 sys.modules[PACKAGE] = pkg
 
 constants = ModuleType(PACKAGE + ".const")
-constants.CONF_X_ADVANCED = "x_advanced_features"
 constants.CONF_X_HOME_ENERGY = "x_household_energy"
 constants.CONF_X_LEGACY_ENERGY_PROBE = "x_legacy_energy_probe"
 sys.modules[constants.__name__] = constants
@@ -48,9 +47,8 @@ class OptInTests(unittest.TestCase):
         )
         self.stat = heat._stat_id(self.coord, 2)
 
-    def test_new_integrations_default_to_core_only(self):
+    def test_new_integrations_default_to_tado_features_without_vaillant(self):
         entry = SimpleNamespace(options={})
-        self.assertFalse(features.advanced_enabled(entry))
         self.assertFalse(features.energy_enabled(entry))
         self.assertFalse(asyncio.run(features.restore_used_legacy_energy_option(
             self.hass, entry, self.coord
@@ -61,7 +59,6 @@ class OptInTests(unittest.TestCase):
         entry = SimpleNamespace(options={
             "fallback": "TADO_DEFAULT",
             "x_capacity_kw": {"2": 3.993},
-            "x_advanced_features": True,
             "x_household_energy": False,
             "x_legacy_energy_probe": True,
         })
@@ -75,7 +72,6 @@ class OptInTests(unittest.TestCase):
             self.hass, entry, self.coord
         ))
         self.assertTrue(enabled)
-        self.assertTrue(features.advanced_enabled(entry))
         self.assertTrue(features.energy_enabled(entry))
         self.assertFalse(entry.options["x_legacy_energy_probe"])
         self.assertEqual(entry.options["x_capacity_kw"]["2"], 3.993)
@@ -112,16 +108,10 @@ class OptInTests(unittest.TestCase):
         self.assertTrue(entry.options["x_legacy_energy_probe"])
         self.assertFalse(features.energy_enabled(entry))
 
-    def test_enabled_features_can_be_selected_independently(self):
-        a = SimpleNamespace(options={
-            "x_advanced_features": True, "x_household_energy": False
-        })
-        b = SimpleNamespace(options={
-            "x_advanced_features": False, "x_household_energy": True
-        })
-        self.assertTrue(features.advanced_enabled(a))
+    def test_only_vaillant_is_a_feature_toggle(self):
+        a = SimpleNamespace(options={"x_household_energy": False})
+        b = SimpleNamespace(options={"x_household_energy": True})
         self.assertFalse(features.energy_enabled(a))
-        self.assertFalse(features.advanced_enabled(b))
         self.assertTrue(features.energy_enabled(b))
 
 
