@@ -38,8 +38,7 @@ TADO_HVAC_ACTION_TO_HA_HVAC_ACTION = {
 CONF_FALLBACK = "fallback"
 CONF_HOME_ID = "home_id"
 CONF_REFRESH_TOKEN = "refresh_token"
-# User-selectable, per-home advanced extras. Fresh installations default OFF.
-CONF_X_ADVANCED = "x_advanced_features"
+# Household-specific Vaillant + installed-radiator extras. Fresh installations default OFF.
 CONF_X_HOME_ENERGY = "x_household_energy"
 # One-time migration of existing users with previously recorded room estimates.
 CONF_X_LEGACY_ENERGY_PROBE = "x_legacy_energy_probe"
