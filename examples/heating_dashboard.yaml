@@ -5,6 +5,8 @@
 # If the binary sensor's entity ID was customized, update the one
 # 'visibility' condition below to its actual entity ID.
 title: Heating
+# For a manually created Lovelace dashboard, set its sidebar icon to
+# mdi:gas-burner under Settings > Dashboards > this dashboard > Icon.
 views:
   - title: Overview
     path: overview
@@ -60,7 +62,7 @@ views:
           - type: heading
             heading: Vaillant heating consumption by room
             heading_style: title
-            icon: mdi:fire
+            icon: mdi:gas-burner
           - type: custom:tado-x-heating-energy-card
             title: Estimated heating gas input by room
             grid_options:
