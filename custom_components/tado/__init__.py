@@ -143,6 +143,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             # Optional HOPS settings should never take down working tado heating.
             _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
+    if coordinator.is_x and (advanced_enabled(entry) or energy_enabled(entry)):
+        # Only show X/household actions in HA Developer Tools if at least
+        # one loaded X home opted into them. Each handler additionally checks
+        # its own per-entry flag before executing.
+        setup_services(hass, extras=True)
     coordinator.x_heating_modes = None
     if coordinator.is_x:
         # Read the saved UTC Top Boost recovery before installing entities.
