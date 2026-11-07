@@ -246,15 +246,11 @@ class AllocationTests(unittest.TestCase):
     def test_calendar_month_filters_only_requested_dates(self):
         from zoneinfo import ZoneInfo
         tz=ZoneInfo("Europe/Brussels")
-        def stamp(day):
-            return datetime(2025,11,day,0,tzinfo=tz).timestamp()
+        base=datetime(2025,11,1,23,tzinfo=tz).timestamp()
         raw={
             allocation._stat_id(self.main,"101"):[
-                {"start":stamp(1),"sum":100},
-                {"start":stamp(2),"sum":101},
-                {"start":stamp(3),"sum":104},
-                {"start":stamp(4),"sum":106},
-                {"start":stamp(5),"sum":108},
+                {"start":base+i*3600,"sum":100+i}
+                for i in range(52)
             ],
             allocation._stat_id(self.main,"102"):[],
             allocation._stat_id(self.main,"unallocated"):[],
@@ -270,7 +266,7 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(result["aggregation"],"day")
         self.assertEqual([x["period"] for x in result["series"]],
                          ["2025-11-02","2025-11-03"])
-        self.assertEqual(sum(row["Kitchen"] for row in result["series"]),4)
+        self.assertEqual(sum(row["Kitchen"] for row in result["series"]),48)
 
     def test_year_uses_monthly_rows_not_three_year_hourly_query(self):
         from zoneinfo import ZoneInfo
