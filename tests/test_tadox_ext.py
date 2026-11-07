@@ -110,6 +110,32 @@ class TadoXApiTests(unittest.TestCase):
         self.assertTrue(r["confirmed"])
         self.assertEqual(calls,["GET","POST","GET"])
 
+    def test_home_heating_quick_actions_use_one_post_and_never_patch_flow(self):
+        calls=[]
+        def fake_request(client,home,method,endpoint,payload):
+            calls.append((home,method,endpoint,payload))
+            return {"status":"success"}
+        async def run():
+            api=module.TadoXClient(FakeCoordinator())
+            with patch.object(module,"_request",fake_request):
+                off=await api.heating_quick_action("off")
+                resume=await api.heating_quick_action("resume")
+                boost=await api.heating_quick_action("boost")
+                with self.assertRaisesRegex(Exception,"Unsupported"):
+                    await api.heating_quick_action("adaptation_off")
+            return [off,resume,boost]
+        results=asyncio.run(run())
+        self.assertEqual(calls,[
+            (123,"POST","quickActions/allOff",None),
+            (123,"POST","quickActions/resumeSchedule",None),
+            (123,"POST","quickActions/boost",None),
+        ])
+        self.assertTrue(all(x["accepted"] for x in results))
+        self.assertEqual(results[-1]["boost_duration_minutes"],30)
+        self.assertTrue(all(x["dhw_changed"] is False for x in results))
+        self.assertTrue(all(x["flow_adaptation_changed_by_integration"] is False
+                            for x in results))
+
     def test_flow_and_dhw_clamp(self):
         state={"setpoint":62,"setpointConstraints":{"min":35,"max":70}}
         flow={"maxFlowTemperature":55,
