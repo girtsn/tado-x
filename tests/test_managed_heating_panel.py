@@ -36,6 +36,8 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         binary = (TADO / "binary_sensor.py").read_text()
         self.assertIn("TadoXVaillantEnergyEnabledBinarySensor", binary)
         self.assertIn("read_only", binary)
+        self.assertIn('"tado_home_id": str(self.coordinator.home_id)', binary)
+        self.assertIn('String(state.attributes?.tado_home_id)', panel)
 
     def test_generic_yaml_hides_entire_vaillant_section(self):
         yaml = EXAMPLE.read_text()
