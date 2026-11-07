@@ -61,6 +61,7 @@ class HeatingModeManager:
         self._lock = asyncio.Lock()
         self._pending_kind: str | None = None
         self._pending_due: datetime | None = None
+        self._mode: str = "unknown"  # last requested HA mode; not device readback
         self._cancel_timer = None
         self._closed = False
         self._last_error: str | None = None
@@ -69,12 +70,19 @@ class HeatingModeManager:
         """Restore a pending Top Boost or failed adaptation restoration."""
         saved = await self.store.async_load()
         if isinstance(saved, dict):
+            self._mode = (
+                saved["mode"] if saved.get("mode") in (
+                    "schedule", "off", "eco_boost", "top_boost", "unknown"
+                ) else "unknown"
+            )
             kind, due = saved.get("kind"), _parse_due(saved.get("due"))
             if kind in ("resume_and_adapt", "adapt_only") and due is not None:
                 self._pending_kind, self._pending_due = kind, due
-            elif saved:
+                # Older state may not include a mode; recovery still proceeds.
+            elif kind is not None:
                 _LOGGER.warning("Ignoring invalid tado X recovery state")
         self._arm_timer()
+        self._notify()
 
     def async_stop(self) -> None:
         """Cancel runtime callback, retaining stored recovery for restart."""
@@ -84,6 +92,16 @@ class HeatingModeManager:
     def status(self) -> dict:
         due = self._pending_due
         return {
+            "mode": self._mode,
+            "mode_label": {
+                "unknown": "Unknown",
+                "schedule": "Schedules",
+                "off": "Heating Off",
+                "eco_boost": "Eco Boost",
+                "top_boost": "Top Boost",
+            }[self._mode],
+            "mode_source": "last_action_through_home_assistant_not_tado_readback",
+            "mode_confirmed_by_device": False,
             "pending": self._pending_kind is not None,
             "kind": self._pending_kind,
             "due_utc": due.isoformat(timespec="seconds") if due else None,
@@ -91,7 +109,14 @@ class HeatingModeManager:
             if due else None,
             "last_recovery_error": self._last_error,
             "storage_persistent": True,
+            "eco_boost_restart_safe": True,
+            "top_boost_restart_safe": True,
         }
+
+    def _notify(self):
+        # Updates the Home Assistant home-mode sensor without forcing extra
+        # tado API/cloud requests. Also updates on the normal zone refresh.
+        self.coordinator.async_update_listeners()
 
     def _cancel_scheduled(self):
         if self._cancel_timer is not None:
@@ -111,17 +136,24 @@ class HeatingModeManager:
         self._cancel_timer = self._schedule_callback(self.hass, on_deadline, due)
 
     async def _set_pending(self, kind: str | None,
-                           due: datetime | None = None) -> None:
+                           due: datetime | None = None,
+                           *, mode: str | None = None) -> None:
         """Save before scheduling, ensuring failed storage cannot orphan a boost."""
         if kind is not None and (kind not in ("resume_and_adapt", "adapt_only")
                                  or due is None or due.tzinfo is None):
             raise ValueError("Invalid recovery state")
+        new_mode = self._mode if mode is None else mode
+        if new_mode not in ("schedule", "off", "eco_boost", "top_boost", "unknown"):
+            raise ValueError("Unsupported home heating mode")
         await self.store.async_save(
-            {"kind": kind, "due": due.isoformat() if due else None}
+            {"kind": kind, "due": due.isoformat() if due else None,
+             "mode": new_mode}
         )
         self._pending_kind, self._pending_due = kind, due
+        self._mode = new_mode
         self._last_error = None
         self._arm_timer()
+        self._notify()
 
     async def _ensure_adaptation_enabled(self):
         """Idempotent: only PATCH when tado reports it was disabled."""
@@ -190,8 +222,11 @@ class HeatingModeManager:
                     await self._resume_and_adapt()
                 else:
                     await self._ensure_adaptation_enabled()
-                await self._set_pending(None)
-                _LOGGER.info("tado X Top Boost restoration completed")
+                await self._set_pending(
+                    None,
+                    mode="schedule" if kind == "resume_and_adapt" else None,
+                )
+                _LOGGER.info("tado X heating boost restoration completed")
             except Exception as err:
                 # Resume already succeeded: retry ONLY enabling adaptation,
                 # never reset any room changes made in the meantime.
@@ -204,16 +239,17 @@ class HeatingModeManager:
                     RECOVERY_RETRY_MINUTES, err,
                 )
                 await self._set_pending(
-                    retry_kind, utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
+                    retry_kind, utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES),
+                    mode="schedule" if retry_kind == "adapt_only"
+                    and kind == "resume_and_adapt" else None,
                 )
                 self._last_error = str(err)
             return self.status()
 
     async def async_action(self, action: str) -> dict:
-        """Execute a user action and manage any outstanding Top Boost timer.
+        """Execute user actions with persisted recovery for BOTH boost modes.
 
-        Former 'boost' remains an alias of 'eco_boost' for HA automation
-        compatibility. New actions cannot run concurrently.
+        'boost' is a backward-compatible alias of 'eco_boost'.
         """
         if action not in ("off", "resume", "boost", "eco_boost", "top_boost"):
             raise HomeAssistantError("Unknown tado X heating quick action")
@@ -224,7 +260,11 @@ class HeatingModeManager:
                 # Persist the deadline BEFORE disabling adaptation, so a
                 # crash or restart cannot leave the system disabled forever.
                 deadline = utcnow() + timedelta(minutes=TOP_BOOST_MINUTES)
-                await self._set_pending("resume_and_adapt", deadline)
+                previous_mode = self._mode
+                previous_kind, previous_due = self._pending_kind, self._pending_due
+                await self._set_pending(
+                    "resume_and_adapt", deadline, mode="top_boost"
+                )
                 boost_attempted = False
                 try:
                     await self.client.set_flow(enabled=False)
@@ -240,13 +280,20 @@ class HeatingModeManager:
                     recovery_kind = (
                         "resume_and_adapt" if boost_attempted else "adapt_only"
                     )
-                    await self._set_pending(recovery_kind, utcnow())
+                    await self._set_pending(
+                        recovery_kind, utcnow(),
+                        mode="schedule" if boost_attempted else previous_mode,
+                    )
                     try:
                         if boost_attempted:
                             await self._resume_and_adapt()
                         else:
                             await self._ensure_adaptation_enabled()
-                        await self._set_pending(None)
+                        await self._set_pending(
+                            None if boost_attempted else previous_kind,
+                            None if boost_attempted else previous_due,
+                            mode="schedule" if boost_attempted else previous_mode,
+                        )
                     except Exception as recovery_error:
                         _LOGGER.warning(
                             "Top Boost failed and immediate recovery failed: %s",
@@ -259,7 +306,10 @@ class HeatingModeManager:
                         )
                         await self._set_pending(
                             retry_kind,
-                            utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
+                            utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES),
+                            mode="schedule" if retry_kind == "adapt_only"
+                            and boost_attempted else previous_mode
+                            if not boost_attempted else None,
                         )
                     raise
                 return {
@@ -288,10 +338,11 @@ class HeatingModeManager:
                 except Exception:
                     await self._set_pending(
                         "adapt_only",
-                        utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
+                        utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES),
+                        mode="schedule",
                     )
                     raise
-                await self._set_pending(None)
+                await self._set_pending(None, mode="schedule")
                 return {
                     **result, "action": "resume",
                     "flow_adaptation_ensured_enabled": True,
@@ -301,29 +352,61 @@ class HeatingModeManager:
 
             if action == "off":
                 result = await self.client.heating_quick_action("off")
-            else:
-                # 'boost' from older automations means Eco Boost.
-                result = await self.client.heating_quick_action("boost")
+                # An old Top/Eco timer must never resume an explicitly
+                # switched-off home. Restore adaptive flow independently.
+                await self._set_pending(None, mode="off")
+                try:
+                    adapted = await self._ensure_adaptation_enabled()
+                except Exception:
+                    await self._set_pending(
+                        "adapt_only",
+                        utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES),
+                    )
+                    raise
+                return {
+                    **result, "action": "off", "mode": "off",
+                    "flow_adaptation_ensured_enabled": True,
+                    "flow_adaptation_changed_by_integration": adapted,
+                    "cancelled_previous_boost": True,
+                }
 
-            # Off or Eco Boost supersedes a pending Top Boost. Never let the
-            # old timer later resume all schedules and undo the newer choice.
-            # Ensure adaptive flow control is on when switching out of Top.
+            # Eco Boost preserves the app's normal quick action, but makes
+            # 30-minute expiry restart-safe just like Top Boost. Adaptation
+            # is enabled first, without changing maximum flow temperature.
+            await self._ensure_adaptation_enabled()
+            deadline = utcnow() + timedelta(minutes=TOP_BOOST_MINUTES)
+            previous_mode = self._mode
+            previous_kind, previous_due = self._pending_kind, self._pending_due
+            await self._set_pending(
+                "resume_and_adapt", deadline, mode="eco_boost"
+            )
+            attempted = False
             try:
-                adapted = await self._ensure_adaptation_enabled()
+                attempted = True
+                result = await self.client.heating_quick_action("boost")
             except Exception:
-                await self._set_pending(
-                    "adapt_only",
-                    utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
-                )
+                # The HTTP request may have reached tado even if the client
+                # experienced a failure. Restore immediately if possible.
+                try:
+                    await self._resume_and_adapt()
+                    await self._set_pending(None, mode="schedule")
+                except Exception as recovery_error:
+                    _LOGGER.warning(
+                        "Eco Boost failed and immediate recovery failed: %s",
+                        recovery_error,
+                    )
+                    await self._set_pending(
+                        "resume_and_adapt",
+                        utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES),
+                    )
                 raise
-            await self._set_pending(None)
             return {
                 **result,
-                "action": "off" if action == "off" else "eco_boost",
-                "mode": "off" if action == "off" else "eco_boost",
+                "action": "eco_boost", "mode": "eco_boost",
                 "flow_adaptation_ensured_enabled": True,
-                "flow_adaptation_changed_by_integration": adapted,
-                "boost_duration_minutes": TOP_BOOST_MINUTES
-                if action != "off" else None,
-                "cancelled_top_boost": True,
+                "boost_duration_minutes": TOP_BOOST_MINUTES,
+                "auto_adaptation_restores_at_utc": deadline.isoformat(),
+                "scheduled_recovery_persisted": True,
+                "return_to_schedule_after_minutes": TOP_BOOST_MINUTES,
+                "cancelled_previous_boost": previous_kind is not None,
             }
