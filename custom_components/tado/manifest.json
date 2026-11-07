@@ -1,9 +1,10 @@
 {
   "domain": "tado",
-  "version": "2026.11.16",
+  "version": "2026.11.17",
   "name": "Tado",
   "codeowners": ["@erwindouna"],
   "config_flow": true,
+  "dependencies": ["frontend", "http"],
   "dhcp": [
     {
       "hostname": "tado*"
