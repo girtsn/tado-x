@@ -233,6 +233,7 @@ class TadoXVaillantEnergyEnabledBinarySensor(TadoHomeEntity, BinarySensorEntity)
     def extra_state_attributes(self):
         return {
             "feature": "household_vaillant_mypyllant_gas_allocation",
+            "tado_home_id": str(self.coordinator.home_id),
             "read_only": True,
             "enabled_from": "tado_integration_options",
             "general_tado_x_controls_always_enabled": True,
