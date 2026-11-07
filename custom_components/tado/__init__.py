@@ -25,7 +25,6 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     CONF_FALLBACK,
     CONF_REFRESH_TOKEN,
-    CONF_X_ADVANCED,
     CONF_X_HOME_ENERGY,
     CONF_X_LEGACY_ENERGY_PROBE,
     CONST_OVERLAY_MANUAL,
@@ -40,7 +39,7 @@ from .services import setup_services
 from .tadox_ext import TadoXSettingsCoordinator
 from .heating_modes import HeatingModeManager
 from .heat_allocation import allocate_recent
-from .x_features import advanced_enabled, energy_enabled, restore_used_legacy_energy_option
+from .x_features import energy_enabled, restore_used_legacy_energy_option
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -135,7 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     await mobile_coordinator.async_config_entry_first_refresh()
 
     coordinator.x_settings = None
-    if coordinator.is_x and advanced_enabled(entry):
+    if coordinator.is_x:
         coordinator.x_settings = TadoXSettingsCoordinator(hass, coordinator)
         try:
             await coordinator.x_settings.async_refresh()
@@ -143,7 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             # Optional HOPS settings should never take down working tado heating.
             _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
-    if coordinator.is_x and (advanced_enabled(entry) or energy_enabled(entry)):
+    if coordinator.is_x:
         # Only show X/household actions in HA Developer Tools if at least
         # one loaded X home opted into them. Each handler additionally checks
         # its own per-entry flag before executing.
@@ -197,12 +196,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bo
         _LOGGER.debug("Migration to Tado entry version 2 successful")
 
     if entry.version < 3:
-        # Existing v2 integration owners had these features available before
-        # option switches existed. Preserve their tado X controls. Household
-        # extras are preserved ONLY when this home already has the v2
-        # Vaillant room-estimate statistics (checked at setup).
+        # All tado X features remain enabled for all users; only household
+        # Vaillant/radiator energy estimation is opt-in. Preserve it when
+        # pre-existing v2 room-estimate statistics prove previous use.
         opts = dict(entry.options)
-        opts.setdefault(CONF_X_ADVANCED, True)
         if CONF_X_HOME_ENERGY not in opts:
             opts[CONF_X_HOME_ENERGY] = False
             opts[CONF_X_LEGACY_ENERGY_PROBE] = True
