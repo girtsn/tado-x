@@ -186,7 +186,7 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
             prior_sum = float(prior[-1]["sum"]) if prior else 0.0
             # Also account for earlier NEW rows from this call.
             if new[zid]:
-                prior_sum = new[zid][-1].sum
+                prior_sum = new[zid][-1]["sum"]
             row = StatisticData(start=hour_start, state=value, sum=prior_sum+value)
             new[zid].append(row)
         processed += 1

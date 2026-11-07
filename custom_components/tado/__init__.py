@@ -71,6 +71,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         StaticPathConfig("/tado/x-heating-energy-card.js",
                          str(folder / "tado-x-heating-energy-card.js"),
                          cache_headers=False),
+        StaticPathConfig("/tado/x-settings-history-card.js",
+                         str(folder / "tado-x-settings-history-card.js"),
+                         cache_headers=False),
     ])
     return True
 

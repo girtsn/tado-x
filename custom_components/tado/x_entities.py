@@ -232,3 +232,50 @@ class TadoXRoomCapacityNumber(TadoZoneEntity, NumberEntity):
             entry, options={**entry.options, "x_capacity_kw": capacities},
         )
         self.async_write_ha_state()
+
+
+class TadoXSettingHistorySensor(TadoXSettingsEntity, SensorEntity):
+    """Long-term Recorder sensor for an otherwise editable settings entity.
+
+    Unlike the number/switch entities, measurement sensors retain hourly means
+    after Home Assistant purges ordinary state history.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(self, settings, main, suffix, name, path):
+        super().__init__(settings, main, suffix)
+        self._attr_name = name
+        self._path = path
+
+    @property
+    def available(self):
+        return super().available and type(self._item(self._path)) in (int, float)
+
+    @property
+    def native_value(self):
+        value = self._item(self._path)
+        return value if type(value) in (int, float) else None
+
+
+class TadoXAdaptationEnabledPercentSensor(TadoXSettingsEntity, SensorEntity):
+    """A 0 or 100% numerical sensor, so monthly mean is % time enabled."""
+
+    _attr_name = "Flow adaptation enabled percentage"
+    _attr_icon = "mdi:autorenew"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, settings, main):
+        super().__init__(settings, main, "flow_adaptation_enabled_history")
+
+    @property
+    def available(self):
+        return super().available and type(self._item("flow.autoAdaptation.enabled")) is bool
+
+    @property
+    def native_value(self):
+        state = self._item("flow.autoAdaptation.enabled")
+        return 100 if state is True else 0 if state is False else None

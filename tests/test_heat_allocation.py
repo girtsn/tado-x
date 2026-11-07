@@ -2,7 +2,6 @@
 
 import asyncio
 import importlib.util
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
@@ -20,11 +19,9 @@ def fake_module(name, **members):
     return mod
 
 
-@dataclass
-class FakeStat:
-    start: datetime
-    state: float
-    sum: float
+class FakeStat(dict):
+    """Match native Home Assistant StatisticData, a TypedDict."""
+
 
 
 fake_module("homeassistant")
@@ -89,7 +86,7 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(result["gas_heating_kwh"],2)
         self.assertEqual(result["allocated_kwh"],2)
         self.assertEqual(result["unallocated_kwh"],0)
-        by_name={meta["statistic_id"]:rows[0].state
+        by_name={meta["statistic_id"]:rows[0]["state"]
                  for meta,rows in self.writes}
         self.assertAlmostEqual(by_name[allocation._stat_id(self.main,"101")],.5)
         self.assertAlmostEqual(by_name[allocation._stat_id(self.main,"102")],1.5)
@@ -98,9 +95,38 @@ class AllocationTests(unittest.TestCase):
         result=asyncio.run(self.run_case(self.snapshots(room2_mean=None)))
         self.assertEqual(result["allocated_kwh"],0)
         self.assertEqual(result["unallocated_kwh"],2)
-        by_name={meta["statistic_id"]:rows[0].state
+        by_name={meta["statistic_id"]:rows[0]["state"]
                  for meta,rows in self.writes}
         self.assertAlmostEqual(by_name[allocation._stat_id(self.main,"unallocated")],2)
+
+    def test_two_hours_preserve_cumulative_sums(self):
+        tminus3=(self.end-timedelta(hours=3)).timestamp()
+        raw={
+            "mypyllant:heating": [
+                {"start":tminus3,"sum":1000},
+                {"start":self.t0,"sum":3000},
+                {"start":self.t1,"sum":5000},
+            ],
+            "sensor.r1":[
+                {"start":self.t0,"mean":25},
+                {"start":self.t1,"mean":50},
+            ],
+            "sensor.r2":[
+                {"start":self.t0,"mean":75},
+                {"start":self.t1,"mean":50},
+            ],
+        }
+        result=asyncio.run(self.run_case(raw))
+        self.assertEqual(result["hours"],2)
+        self.assertEqual(result["gas_heating_kwh"],4)
+        by_name={meta["statistic_id"]:rows for meta,rows in self.writes}
+        room1=by_name[allocation._stat_id(self.main,"101")]
+        room2=by_name[allocation._stat_id(self.main,"102")]
+        self.assertEqual(len(room1),2)
+        self.assertAlmostEqual(room1[0]["sum"],.5)
+        self.assertAlmostEqual(room1[1]["sum"],1.5)
+        self.assertAlmostEqual(room2[1]["sum"],2.5)
+        self.assertEqual(result["unallocated_kwh"],0)
 
     def test_dry_run_writes_nothing(self):
         result=asyncio.run(self.run_case(self.snapshots(),dry_run=True))
