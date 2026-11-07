@@ -125,7 +125,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     }
     if(this._message)card.append(this._el("p",this._message,"notice"));
     if(this._busy)card.append(this._el("p","Updating…","muted"));
-    card.append(this._el("p","Modelled shares of Vaillant gas INPUT, not physical heat delivered by a radiator. Default capacity is 1 kW per radiator until adjusted. Unallocated includes hours with missing room demand or no active demand. Previous Vaillant statistics are not modified.","muted"));
+    card.append(this._el("p","Estimated shares of Vaillant heating-gas INPUT, not measured heat delivered to each radiator. Allocation uses actual room heating demand weighted by the installed radiators' EN442 rated output at 75/65/20°C (11 radiators, 10 rooms, total 25.748 kW nominal). This rating is a reference capacity, not actual output at lower water temperatures. Unallocated represents gas input when demand data is missing or no room reports heating demand. Original Vaillant statistics remain unchanged.","muted"));
     root.append(card);
   }
 }
