@@ -294,7 +294,7 @@ class TadoXScheduleCard extends HTMLElement {
     root.append(card);
   }
 }
-customElements.define("tado-x-schedule-card",TadoXScheduleCard);
+if(!customElements.get("tado-x-schedule-card")) customElements.define("tado-x-schedule-card",TadoXScheduleCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-schedule-card",name:"tado X weekly schedules",
   description:"Review, copy and safely edit room heating time blocks"});
