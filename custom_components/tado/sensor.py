@@ -31,7 +31,11 @@ from .const import (
 )
 from .coordinator import TadoDataUpdateCoordinator
 from .entity import TadoHomeEntity, TadoZoneEntity
-from .x_entities import TadoXAdaptedFlowSensor
+from .x_entities import (
+    TadoXAdaptedFlowSensor,
+    TadoXSettingHistorySensor,
+    TadoXAdaptationEnabledPercentSensor,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -242,7 +246,18 @@ async def async_setup_entry(
         )
 
     if tado.is_x and tado.x_settings is not None:
-        entities.append(TadoXAdaptedFlowSensor(tado.x_settings, tado))
+        entities.extend([
+            TadoXAdaptedFlowSensor(tado.x_settings, tado),
+            TadoXSettingHistorySensor(
+                tado.x_settings, tado, "dhw_setpoint_history",
+                "DHW target temperature history", "dhw.setpoint",
+            ),
+            TadoXSettingHistorySensor(
+                tado.x_settings, tado, "flow_max_temperature_history",
+                "Maximum flow temperature history", "flow.maxFlowTemperature",
+            ),
+            TadoXAdaptationEnabledPercentSensor(tado.x_settings, tado),
+        ])
     async_add_entities(entities, True)
 
 
