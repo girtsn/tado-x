@@ -12,6 +12,7 @@ from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import allocate_recent, allocation_history, diagnose_unallocated
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 from .room_override import room_override_report, observed_home_mode
+from .x_features import advanced_enabled, energy_enabled
 
 from .const import (
     ATTR_MESSAGE,
@@ -60,16 +61,21 @@ def setup_services(hass: HomeAssistant) -> None:
 
     # tado X services live in the existing 'tado' domain so there is no second
     # integration, login, or separate set of device entities.
-    def get_x_coordinator(call: ServiceCall):
+    def get_x_coordinator(call: ServiceCall, *, energy: bool = False):
         selected = call.data.get("config_entry")
         entries = [e for e in hass.config_entries.async_entries(DOMAIN)
                    if getattr(getattr(e, "runtime_data", None), "coordinator", None)
                    and e.runtime_data.coordinator.is_x]
         if selected:
             entries = [e for e in entries if e.entry_id == selected]
+        enabled = energy_enabled if energy else advanced_enabled
+        entries = [e for e in entries if enabled(e)]
         if len(entries) != 1:
+            label = ("household energy estimation" if energy
+                     else "advanced tado X controls")
             raise ServiceValidationError(
-                "Select one loaded tado X home via config_entry"
+                f"Select a loaded tado X home with {label} enabled "
+                "under Settings → Devices & services → tado → Configure"
             )
         return entries[0].runtime_data.coordinator
 
@@ -230,7 +236,7 @@ def setup_services(hass: HomeAssistant) -> None:
     )
 
     async def x_compute_estimates(call: ServiceCall) -> dict:
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         async with main.x_allocation_lock:
             return await allocate_recent(
                 hass, main, days=call.data.get("days", 3),
@@ -238,7 +244,7 @@ def setup_services(hass: HomeAssistant) -> None:
             )
 
     async def x_estimate_history(call: ServiceCall) -> dict:
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         return await allocation_history(
             hass, main, period=call.data.get("period", "month")
         )
@@ -259,7 +265,7 @@ def setup_services(hass: HomeAssistant) -> None:
 
     async def x_diagnose_unallocated(call: ServiceCall) -> dict:
         """Read-only local Recorder diagnostic, never changing estimates."""
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         return await diagnose_unallocated(
             hass, main, days=call.data.get("days", 35),
             limit=call.data.get("limit", 30),
@@ -297,7 +303,7 @@ def setup_services(hass: HomeAssistant) -> None:
 
     async def x_radiator_capacities(call: ServiceCall) -> dict:
         """Show current tado room-to-physical-radiator mapping and rated W."""
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         return radiator_capacity_report(
             main.zones, main.config_entry.options.get("x_capacity_kw", {}),
             main.config_entry.options.get("x_radiator_room_mapping", {}),
@@ -305,7 +311,7 @@ def setup_services(hass: HomeAssistant) -> None:
 
     async def x_apply_radiator_capacities(call: ServiceCall) -> dict:
         """Persist only safely matched nominal capacities; never write tado."""
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         report = radiator_capacity_report(
             main.zones, main.config_entry.options.get("x_capacity_kw", {}),
             main.config_entry.options.get("x_radiator_room_mapping", {}),
@@ -360,7 +366,7 @@ def setup_services(hass: HomeAssistant) -> None:
         This changes only Home Assistant's local estimate metadata; it does NOT
         change tado cloud schedules, devices, radiator valves or boiler flow.
         """
-        main = get_x_coordinator(call)
+        main = get_x_coordinator(call, energy=True)
         room_id = str(call.data["room_id"])
         if room_id not in {str(z["id"]) for z in main.zones}:
             raise ServiceValidationError("Unknown tado room_id; call tado.x_list_rooms")
