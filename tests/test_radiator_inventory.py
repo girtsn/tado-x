@@ -68,6 +68,49 @@ class RadiatorInventoryTests(unittest.TestCase):
         self.assertEqual(capacities["1fl Bathroom"]["tado_radiator_valves"],1)
         self.assertNotEqual(capacities["0fl Entrance hallway"]["room_id"],2)
 
+    def test_exact_live_tado_room_names_cover_all_installed_wattage(self):
+        """Regression fixture from the real tado X radiator inventory probe.
+
+        tado room_id=11 has TWO radiator valves, but R11 is the bathroom.
+        IDs for tado rooms and physical radiators are independent.
+        """
+        zones = [
+            room(10, "2fl bathroom"),
+            room(11, "2fl bedroom", valve_count=2),
+            room(7, "1fl bedroom streetside"),
+            room(8, "1fl bedroom yardside"),
+            room(9, "1fl bedroom small"),
+            room(14, "1fl bathroom", remote=True),
+            room(2, "0fl living room"),
+            room(4, "0fl kitchen"),
+            room(5, "0fl hallway"),
+            room(6, "0fl toilet"),
+        ]
+        report = inventory.radiator_capacity_report(zones)
+        self.assertEqual(report["matched_rooms"], 10)
+        self.assertEqual(report["matched_rated_w"], 25748)
+        self.assertEqual(report["total_inventory_w"], 25748)
+        self.assertEqual(
+            [(row["room_id"], row["radiator_ids"], row["capacity_kw"])
+             for row in report["rooms"]],
+            [
+                (10, ["R11"], 3.269),
+                (11, ["R09", "R10"], 6.538),
+                (7, ["R06"], 2.424),
+                (8, ["R05"], 2.424),
+                (9, ["R07"], 1.449),
+                (14, ["R08"], 1.212),
+                (2, ["R01"], 3.993),
+                (4, ["R03"], 2.075),
+                (5, ["R02"], 1.643),
+                (6, ["R04"], 0.721),
+            ],
+        )
+        self.assertTrue(all(row["status"] == "matched" for row in report["rooms"]))
+        self.assertEqual(
+            sum(inventory.require_valid_capacities(zones).values()), 25.748,
+        )
+
     def test_ambiguous_name_never_assigned(self):
         zones=[room(1,"Bedroom"),room(2,"Bathroom")]
         report=inventory.radiator_capacity_report(zones)
