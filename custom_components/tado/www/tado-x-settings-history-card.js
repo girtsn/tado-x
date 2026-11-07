@@ -21,11 +21,18 @@ class TadoXSettingsHistoryCard extends HTMLElement {
   constructor(){
     super();this.attachShadow({mode:"open"});this._cfg={};
     this._hass=null;this._once=false;this._period="week";
+    this._dateRange=null;this._requestId=0;
     this._series={};this._busy=false;this._message="";
     this._hidden=new Set();this._actionBusy=false;this._actionMessage="";
     this._statusTicker=null;
   }
   setConfig(cfg){this._cfg=cfg||{};this._render();}
+  set dateRange(range){
+    if(!range || (this._dateRange?.start===range.start &&
+                   this._dateRange?.end===range.end))return;
+    this._dateRange=range;
+    if(this._once)this._load();
+  }
   set hass(hass){
     this._hass=hass;
     if(!this._once && hass){this._once=true;this._load();}
@@ -66,7 +73,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     }));
   }
   async _load(){
-    if(this._busy||!this._hass)return;
+    if(!this._hass)return;
+    const request=++this._requestId;
     this._busy=true;this._render();
     try{
       const ids=[...new Set([
@@ -75,16 +83,22 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       ].filter(Boolean))];
       if(!ids.length)throw Error("No historical temperature sensors found. Update the tado X integration and restart Home Assistant.");
       const range=XH_PERIODS.find(x=>x.key===this._period);
-      const end=new Date(),start=new Date(end.getTime()-range.days*86400000);
+      const end=this._dateRange?new Date(this._dateRange.end):new Date();
+      const start=this._dateRange?new Date(this._dateRange.start):
+        new Date(end.getTime()-range.days*86400000);
+      const days=(end-start)/86400000;
+      const granularity=this._dateRange?
+        (days<=2?"hour":days<=92?"day":"month"):range.period;
       const result=await this._hass.callWS({
         type:"recorder/statistics_during_period",
         start_time:start.toISOString(),end_time:end.toISOString(),
-        statistic_ids:ids,period:range.period,
+        statistic_ids:ids,period:granularity,
         types:["mean","min","max"],
       });
-      this._series=result||{};this._message="";
-    }catch(e){this._message="History unavailable: "+(e?.message||e);this._series={};}
-    finally{this._busy=false;this._render();}
+      if(request===this._requestId){this._series=result||{};this._message="";}
+    }catch(e){if(request===this._requestId){
+      this._message="History unavailable: "+(e?.message||e);this._series={};
+    }}finally{if(request===this._requestId){this._busy=false;this._render();}}
   }
   _el(tag,text,cls){
     const node=document.createElement(tag);
@@ -152,9 +166,14 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     return tile;
   }
   _dateLabel(ts){
-    const opts=this._period==="day"?{hour:"2-digit",minute:"2-digit"}:
-      (this._period==="year"||this._period==="3years")
-        ?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
+    const days=this._dateRange?
+      (new Date(this._dateRange.end)-new Date(this._dateRange.start))/86400000:null;
+    const opts=this._dateRange?
+      (days<=2?{hour:"2-digit",minute:"2-digit"}:
+       days>92?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"}):
+      this._period==="day"?{hour:"2-digit",minute:"2-digit"}:
+      (this._period==="year"||this._period==="3years")?
+        {month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
     return new Date(ts).toLocaleString(undefined,opts);
   }
   _combinedChart(){
@@ -184,7 +203,9 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       return wrap;
     }
     const period=XH_PERIODS.find(p=>p.key===this._period);
-    const maxTime=Date.now(),minTime=maxTime-period.days*86400000;
+    const maxTime=this._dateRange?new Date(this._dateRange.end).getTime():Date.now();
+    const minTime=this._dateRange?new Date(this._dateRange.start).getTime():
+      maxTime-period.days*86400000;
     const values=visible.flatMap(i=>i.rows.map(p=>p.y));
     let low=Math.floor((Math.min(...values)-2)/5)*5;
     let high=Math.ceil((Math.max(...values)+2)/5)*5;
@@ -216,8 +237,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       label.textContent=this._dateLabel(when);svg.append(label);
     }
     for(const item of visible){
-      const maxGap=period.period==="hour"?4*3600000:
-        period.period==="day"?4*86400000:65*86400000;
+      const days=(maxTime-minTime)/86400000;
+      const grouping=this._dateRange?
+        (days<=2?"hour":days<=92?"day":"month"):period.period;
+      const maxGap=grouping==="hour"?4*3600000:
+        grouping==="day"?4*86400000:65*86400000;
       let segment=[],previous=null;
       const segments=[];
       for(const p of item.rows){
@@ -462,9 +486,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       this._state(target.control,"number"),"°C","Target, not measured tank temperature"));
     card.append(dhw);
     const tabs=this._el("div",null,"tabs");
-    for(const range of XH_PERIODS){
-      tabs.append(this._button(range.label,
-        ()=>{this._period=range.key;this._load();},this._period===range.key));
+    if(!this._cfg.shared_date_range){
+      for(const range of XH_PERIODS){
+        tabs.append(this._button(range.label,
+          ()=>{this._period=range.key;this._load();},this._period===range.key));
+      }
     }
     tabs.append(this._button("Refresh",()=>this._load()));
     card.append(tabs);
