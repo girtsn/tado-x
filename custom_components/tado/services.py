@@ -120,6 +120,7 @@ def setup_services(hass: HomeAssistant, *, extras: bool = False) -> None:
             call.data["room_id"], call.data["day"],
             call.data["blocks"], call.data["expected_signature"],
         )
+        coord.schedule_post_action_room_refresh()
         return result
 
     async def x_get_settings(call: ServiceCall) -> dict:
