@@ -245,51 +245,82 @@ class TadoXSettingsHistoryCard extends HTMLElement {
       ". Tap a legend item to hide or show a temperature line.","note"));
     return wrap;
   }
+
   _render(){
     const root=this.shadowRoot;root.replaceChildren();
     const style=this._el("style");
-    style.textContent=`
-      :host{display:block;font-family:var(--primary-font-family,Roboto,Arial,sans-serif);color:var(--primary-text-color)}
-      ha-card{display:block;background:var(--card-background-color,var(--ha-card-background,#fff));border:1px solid var(--divider-color,#ddd);border-radius:12px;padding:16px}
-      h2{font-size:19px;font-weight:500;margin:0 0 10px}
-      .tabs,.controls{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
-      button{border:1px solid var(--divider-color,#aaa);background:var(--card-background-color,#fff);color:inherit;border-radius:6px;padding:7px 10px;cursor:pointer}
-      button.active{background:var(--primary-color,#1976d2);color:white;border-color:var(--primary-color,#1976d2)}
-      button:disabled{opacity:.6}.controls button{flex:1 1 160px;text-align:left}
-      .controls strong{display:block;margin-top:5px;font-size:18px;font-variant-numeric:tabular-nums}
-      .graphs{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:12px;margin:10px 0}
-      .plot{border:1px solid var(--divider-color,#ddd);padding:10px;border-radius:8px;min-width:0}
-      .plot-title{font-size:13px;font-weight:500}
-      .value{font-size:20px;font-weight:600;margin:6px 0}
-      .plot svg{width:100%;height:auto}
-      .note{font-size:12px;color:var(--secondary-text-color,#888);line-height:1.5}
-      .message{padding:8px;background:var(--secondary-background-color,#eee);border-radius:6px}
-    `;
-    root.append(style);const card=this._el("ha-card");
-    card.append(this._el("h2",this._cfg.title||"Hot-water and heating optimisation"));
-    const controls=this._el("div",null,"controls");
-    for(const s of [...XH_SOURCES.filter(s=>s.control),...XH_EXTRA]){
-      const domain=s.domain || (s.id==="adapted"?"switch":"number");
-      const id=this._state(s.control||s.match,domain);
-      const state=id?this._hass.states[id]?.state:null;
-      const b=this._button(s.title||s.control,()=>this._showMore(id));
-      b.disabled=this._busy||!id;
-      const val=this._el("strong",state!=null?
-        (state==="on"?"On":state==="off"?"Off":state+(s.unit?" "+s.unit:"")):"Unavailable");
-      b.append(val);controls.append(b);
-    }
-    card.append(controls);
+    style.textContent=[
+      ":host{display:block;font-family:var(--primary-font-family,Roboto,Arial,sans-serif);color:var(--primary-text-color)}",
+      "ha-card{display:block;background:var(--card-background-color,var(--ha-card-background,#fff));border:1px solid var(--divider-color,#ddd);border-radius:12px;padding:16px}",
+      "h2{font-size:19px;font-weight:500;margin:0 0 12px}",
+      "h3{font-size:15px;font-weight:600;margin:12px 0 6px}",
+      ".section-head{font-size:13px;font-weight:600;letter-spacing:.02em;margin-top:14px}",
+      ".controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0 16px}",
+      "button{border:1px solid var(--divider-color,#aaa);background:transparent;color:inherit;border-radius:8px;padding:9px;cursor:pointer;font:inherit}",
+      "button:disabled{opacity:.6;cursor:not-allowed}",
+      ".setting-tile{text-align:left;min-height:76px;padding:12px;border:1px solid var(--divider-color,#ddd)}",
+      ".tile-label{display:block;font-size:13px;font-weight:500}",
+      ".tile-value{display:block;font-size:21px;font-variant-numeric:tabular-nums;margin-top:8px}",
+      ".tile-note{display:block;font-size:11px;color:var(--secondary-text-color,#777);margin-top:5px}",
+      ".tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 16px}",
+      ".tabs button{padding:8px 11px}",
+      ".tabs button.active{background:var(--primary-color,#1976d2);color:white;border-color:var(--primary-color,#1976d2)}",
+      ".plot{border:1px solid var(--divider-color,#ddd);border-radius:8px;padding:10px 8px;margin:8px 0 14px}",
+      ".plot svg{display:block;width:100%;height:auto;overflow:visible}",
+      ".plot-title{margin:0 0 8px 4px}",
+      ".legend{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}",
+      ".legend-item{display:flex;align-items:center;gap:6px;border-radius:999px;font-size:11px;padding:6px 8px;opacity:.5}",
+      ".legend-item.selected{opacity:1;background:var(--secondary-background-color,#eee)}",
+      ".legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0}",
+      ".note{font-size:12px;color:var(--secondary-text-color,#777);line-height:1.5;margin:8px 2px}",
+      ".message{padding:8px;background:var(--secondary-background-color,#eee);border-radius:6px;font-size:13px}"
+    ].join("\n");
+    root.append(style);
+    const card=this._el("ha-card");
+    card.append(this._el("h2",this._cfg.title||"Heating flow and hot water"));
+    card.append(this._el("div","Heating flow optimisation","section-head"));
+    const flow=this._el("div",null,"controls");
+    const maxflow=XH_SOURCES.find(x=>x.id==="maxflow");
+    const optimised=XH_SOURCES.find(x=>x.id==="optimised");
+    const adapted=XH_SOURCES.find(x=>x.id==="adapted");
+    const enabledRows=this._rows(adapted);
+    const avg=enabledRows.length
+      ? enabledRows.reduce((acc,p)=>acc+p.y,0)/enabledRows.length:null;
+    flow.append(this._tile("Maximum flow temperature",
+      this._state(maxflow.control,"number"),"°C","Configured upper limit"));
+    flow.append(this._tile("tado optimised flow",
+      this._sensorId(optimised),"°C","Calculated limit, not measured flow"));
+    flow.append(this._tile("Automatic flow adaptation",
+      this._state(adapted.control,"switch"),"",
+      avg!==null?"Recorded mean: "+this._round(avg)+"% On":"Setting: On / Off"));
+    flow.append(this._tile("Outside temperature",
+      this._outdoorId(),"°C","Weather estimate or selected sensor"));
+    card.append(flow);
+    card.append(this._el("div","Domestic hot water","section-head"));
+    const dhw=this._el("div",null,"controls");
+    const target=XH_SOURCES.find(x=>x.id==="dhw");
+    dhw.append(this._tile("Hot-water target",
+      this._state(target.control,"number"),"°C","Target, not measured tank temperature"));
+    dhw.append(this._tile("DHW mode (experimental)",
+      this._state("DHW operating mode","select"),"",
+      "Auto / boost On / Off"));
+    card.append(dhw);
     const tabs=this._el("div",null,"tabs");
-    for(const d of XH_PERIODS){
-      tabs.append(this._button(d.label,()=>{this._period=d.key;this._load();},this._period===d.key));
+    for(const range of XH_PERIODS){
+      tabs.append(this._button(range.label,
+        ()=>{this._period=range.key;this._load();},this._period===range.key));
     }
-    tabs.append(this._button("Refresh",()=>this._load()));card.append(tabs);
-    const charts=this._el("div",null,"graphs");
-    for(const source of XH_SOURCES)charts.append(this._chart(source));
-    card.append(charts);
+    tabs.append(this._button("Refresh",()=>this._load()));
+    card.append(tabs);
+    card.append(this._combinedChart());
     if(this._message)card.append(this._el("p",this._message,"message"));
-    if(this._busy)card.append(this._el("p","Reading Home Assistant history…","note"));
-    card.append(this._el("p","Tap a current-setting tile to open its native Home Assistant control. Graphs show historical hourly/daily/monthly average settings; DHW and flow values are targets, not actual water temperatures. The adaptation-enabled graph shows approximate percentage of time enabled. History starts only after the new sensors were installed and Recorder began collecting them.","note"));
+    if(this._busy)card.append(this._el("p","Reading recorded temperatures…","note"));
+    card.append(this._el("p",
+      "Temperature history uses one Celsius scale. Maximum flow and DHW are target limits; optimised flow is calculated by tado; outside temperature is from the sensor named below the chart. No trace measures actual boiler outlet flow. Automatic flow adaptation is an On/Off setting; its historical mean percentage is shown in the tile. New setting histories cannot be reconstructed before installation.",
+      "note"));
+    card.append(this._el("p",
+      "DHW Auto requests resumeSchedule, On sends boost ON, and Off sends boost OFF. These HOPS operations are experimental: the hot-water programme could not be read on this home. Check the tado app to confirm how each command behaves before relying on it.",
+      "note"));
     root.append(card);
   }
 }
