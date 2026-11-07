@@ -1,5 +1,24 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.25 — Home/Away/Auto control and effective-presence history
+
+The Tado home already exposes a **Presence** selector (Home / Away / Auto).
+Now it also has a **read-only Effective presence sensor**, which reports the
+actual Home/Away returned by Tado even when control mode is Auto.
+
+The integration-managed **Heating → Overview** panel shows a combined,
+shared-calendar history with (1) Tado selected Home/Away/Auto mode,
+(2) Tado effective Home/Away state, and (3) `sensor.home_presence` from the
+independent Device Availability Digest integration when available. These are
+categorical, not temperature or numerical series. Hover over segments or
+expand the transition list to see change times. History comes from the
+Home Assistant Recorder database; no records before entity creation are
+invented. The card only reads current HA states and stored history and
+does not issue Tado mode or heating commands.
+
+No additional frontend resources or YAML are required for the managed
+Heating dashboard. Update through HACS and restart Home Assistant.
+
 ## v2026.11.21 — recover from intermittent blank Heating panel
 
 The integration-managed Heating panel registers before importing its dependent frontend cards. Slow or temporarily failed imports show a loading message with an explicit retry button instead of a blank page. One-time version change reload is protected against a refresh loop. No heating logic, cloud API calls, schedules or private automations changed.
