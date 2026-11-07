@@ -61,7 +61,7 @@ class AllocationTests(unittest.TestCase):
             zones=[{"id":101,"name":"Kitchen"},{"id":102,"name":"Bath"}],
             config_entry=SimpleNamespace(options={}),
         )
-        self.hass=SimpleNamespace(data={})
+        self.hass=SimpleNamespace(data={},config=SimpleNamespace(time_zone="Europe/Brussels"))
         self.end=datetime.now(timezone.utc).replace(minute=0,second=0,microsecond=0)
         self.t0=(self.end-timedelta(hours=2)).timestamp()
         self.t1=(self.end-timedelta(hours=1)).timestamp()
@@ -203,6 +203,132 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(result["unallocated_kwh"], 0)
         self.assertEqual(result["total_unallocated_hours"], 0)
         self.assertFalse(result["missing_room_breakdown"])
+
+
+    def test_calendar_day_keeps_both_repeated_dst_hours(self):
+        # Brussels 25 October 2026 observes 02:00 twice: CEST and CET.
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Europe/Brussels")
+        prior=datetime(2026,10,24,23,tzinfo=timezone.utc).timestamp()
+        first=datetime(2026,10,25,0,tzinfo=timezone.utc).timestamp()
+        second=datetime(2026,10,25,1,tzinfo=timezone.utc).timestamp()
+        raw={
+            allocation._stat_id(self.main,"101"):[
+                {"start":prior,"sum":1000},
+                {"start":first,"sum":2000},
+                {"start":second,"sum":4000},
+            ],
+            allocation._stat_id(self.main,"102"):[
+                {"start":prior,"sum":0},{"start":first,"sum":0},
+                {"start":second,"sum":0},
+            ],
+            allocation._stat_id(self.main,"unallocated"):[
+                {"start":prior,"sum":0},{"start":first,"sum":0},
+                {"start":second,"sum":0},
+            ]
+        }
+        async def fetch(*args, **kwargs):
+            self.assertEqual(args[-1],"hour")
+            return raw
+        with patch.object(allocation,"_fetch",fetch):
+            result=asyncio.run(allocation.allocation_history(
+                self.hass,self.main,period="day",
+                start_date="2026-10-25",end_date="2026-10-25"))
+        self.assertEqual(result["aggregation"],"hour")
+        values=[(row["period"],row.get("Kitchen",0)) for row in result["series"]
+                if row.get("Kitchen",0)>0]
+        self.assertEqual(len(values),2)
+        self.assertEqual([x[1] for x in values],[1000,2000])
+        self.assertNotEqual(values[0][0],values[1][0])
+        self.assertIn("+02:00",values[0][0])
+        self.assertIn("+01:00",values[1][0])
+
+    def test_calendar_month_filters_only_requested_dates(self):
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Europe/Brussels")
+        def stamp(day):
+            return datetime(2025,11,day,0,tzinfo=tz).timestamp()
+        raw={
+            allocation._stat_id(self.main,"101"):[
+                {"start":stamp(1),"sum":100},
+                {"start":stamp(2),"sum":101},
+                {"start":stamp(3),"sum":104},
+                {"start":stamp(4),"sum":106},
+                {"start":stamp(5),"sum":108},
+            ],
+            allocation._stat_id(self.main,"102"):[],
+            allocation._stat_id(self.main,"unallocated"):[],
+        }
+        async def fetch(*args,**kwargs):
+            return raw
+        with patch.object(allocation,"_fetch",fetch):
+            result=asyncio.run(allocation.allocation_history(
+                self.hass,self.main,period="month",
+                start_date="2025-11-02",end_date="2025-11-03"))
+        self.assertEqual(result["range_start"],"2025-11-02")
+        self.assertEqual(result["range_end"],"2025-11-03")
+        self.assertEqual(result["aggregation"],"day")
+        self.assertEqual([x["period"] for x in result["series"]],
+                         ["2025-11-02","2025-11-03"])
+        self.assertEqual(sum(row["Kitchen"] for row in result["series"]),4)
+
+    def test_year_uses_monthly_rows_not_three_year_hourly_query(self):
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Europe/Brussels")
+        def month(y,m):
+            return datetime(y,m,1,0,tzinfo=tz).timestamp()
+        raw={
+            allocation._stat_id(self.main,"101"):[
+                {"start":month(2024,12),"sum":10},
+                {"start":month(2025,1),"sum":13},
+                {"start":month(2025,2),"sum":17},
+                {"start":month(2025,3),"sum":20},
+            ]
+        }
+        queried=[]
+        async def fetch(*args,**kwargs):
+            queried.append(args[-1])
+            return raw
+        with patch.object(allocation,"_fetch",fetch):
+            result=asyncio.run(allocation.allocation_history(
+                self.hass,self.main,period="year",
+                start_date="2025-01-01",end_date="2025-12-31"))
+        self.assertEqual(queried,["month"])
+        self.assertEqual(result["aggregation"],"month")
+        self.assertEqual([x["period"] for x in result["series"]],
+                         ["2025-01","2025-02","2025-03"])
+        self.assertEqual([x["Kitchen"] for x in result["series"]],[3,4,3])
+
+    def test_custom_long_period_exact_partial_month_edges(self):
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Europe/Brussels")
+        def stamp(month,day):
+            return datetime(2025,month,day,0,tzinfo=tz).timestamp()
+        monthly={allocation._stat_id(self.main,"101"):[
+            {"start":stamp(m,1),"sum":m*100} for m in range(1,8)]}
+        hourly={allocation._stat_id(self.main,"101"):[
+            {"start":stamp(1,9),"sum":0},
+            {"start":stamp(1,10),"sum":5},
+            {"start":stamp(7,1),"sum":5},
+            {"start":stamp(7,2),"sum":8},
+        ]}
+        queried=[]
+        async def fetch(hass,start,end,ids,period="hour"):
+            queried.append((period,start,end))
+            if period=="month":return monthly
+            # Include only the requested local month/edge, plus the preceding
+            # baseline row used for the first delta.
+            return {key:[r for r in rows if
+                        (start-timedelta(hours=1)).timestamp()<=r["start"]<end.timestamp()]
+                    for key,rows in hourly.items()}
+        with patch.object(allocation,"_fetch",fetch):
+            result=asyncio.run(allocation.allocation_history(
+                self.hass,self.main,period="custom",
+                start_date="2025-01-10",end_date="2025-07-20"))
+        self.assertEqual(result["aggregation"],"month")
+        self.assertEqual([q[0] for q in queried],["month","hour","hour"])
+        self.assertIn("2025-01", [r["period"] for r in result["series"]])
+        self.assertIn("2025-07", [r["period"] for r in result["series"]])
 
     def test_dry_run_writes_nothing(self):
         result=asyncio.run(self.run_case(self.snapshots(),dry_run=True))
