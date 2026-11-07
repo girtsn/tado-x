@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .tadox_ext import TadoXClient
 from .entity import TadoZoneEntity
-from .heat_allocation import _capacities
+from .radiator_inventory import radiator_capacity_report
 
 
 class TadoXSettingsEntity(CoordinatorEntity):
@@ -199,35 +199,61 @@ class TadoXDhwModeSelect(TadoXSettingsEntity, SelectEntity):
 
 
 class TadoXRoomCapacityNumber(TadoZoneEntity, NumberEntity):
-    """Locally configured rated radiator capacity used only for estimates.
+    """Installed EN442 radiator rated capacity (kW) per tado heating room.
 
-    Default is 1 kW per VA family radiator thermostat in the room. This is an
-    assumption, not hardware-reported radiator size or measured output.
+    Room totals are automatically derived from the verified physical radiator
+    inventory when a unique name match exists. A manual change persists in HA
+    config entry options and overrides that room only.
     """
 
     _attr_name = "Estimated radiator capacity"
     _attr_icon = "mdi:radiator"
     _attr_native_unit_of_measurement = "kW"
-    _attr_native_min_value = 0.1
+    _attr_native_min_value = 0.05
     _attr_native_max_value = 15.0
-    _attr_native_step = 0.1
+    _attr_native_step = 0.001  # exact 3.993 kW / 6.538 kW etc
     _attr_mode = NumberMode.BOX
 
     def __init__(self, main, zone):
         super().__init__(zone["name"], main.home_id, zone["id"], main)
+        # Retain unique ID from v2026.11.8 for an in-place HA entity upgrade.
         self._attr_unique_id = f"{main.home_id}_x_room_{zone['id']}_radiator_capacity"
         self._room_id = str(zone["id"])
 
     @property
+    def _capacity_row(self):
+        report = radiator_capacity_report(
+            self.coordinator.zones,
+            self.coordinator.config_entry.options.get("x_capacity_kw", {}),
+        )
+        return next(row for row in report["rooms"]
+                    if str(row["room_id"]) == self._room_id)
+
+    @property
     def native_value(self):
-        return _capacities(self.coordinator)[self._room_id]
+        return self._capacity_row["capacity_kw"]
+
+    @property
+    def extra_state_attributes(self):
+        row = self._capacity_row
+        return {
+            "rating": "EN442 75/65/20 °C (Delta-T50)",
+            "matched_status": row["status"],
+            "source": row["source"],
+            "physical_radiator_ids": row["radiator_ids"],
+            "radiators": row["radiators"],
+            "rated_output_w": row["rated_w"],
+            "manual_override_kw": row["manual_override_kw"],
+            "tado_valve_count": row["tado_radiator_valves"],
+            "is_nominal_capacity_not_measured_consumption": True,
+        }
 
     async def async_set_native_value(self, value):
-        if not 0.1 <= value <= 15.0:
-            raise ValueError("Radiator capacity must be 0.1–15 kW")
+        if not 0.05 <= value <= 15.0:
+            raise ValueError("Radiator output must be 0.050–15.000 kW")
         entry = self.coordinator.config_entry
         capacities = dict(entry.options.get("x_capacity_kw", {}))
-        capacities[self._room_id] = float(value)
+        capacities[self._room_id] = round(float(value), 3)
         self.hass.config_entries.async_update_entry(
             entry, options={**entry.options, "x_capacity_kw": capacities},
         )
