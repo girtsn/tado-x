@@ -173,6 +173,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 sidebar_title="tado X Heating",
                 sidebar_icon="mdi:home-thermometer",
                 module_url="/tado/x-managed-panel.js",
+                config={
+                    "config_entry": entry.entry_id,
+                    "home_id": str(coordinator.home_id),
+                },
                 require_admin=False,
             )
         except (ValueError, RuntimeError):
