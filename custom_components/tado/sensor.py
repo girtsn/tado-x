@@ -375,7 +375,8 @@ class TadoXHeatingHomeModeSensor(TadoHomeEntity, SensorEntity):
             "room_status_is_live_cache": True,
             "mode_source": "tado_room_states_with_home_assistant_boost_timer",
             "mode_confirmed_by_device": (
-                report["unknown_count"] == 0
+                report["total_rooms"] > 0
+                and report["unknown_count"] == 0
                 and not live["boost_timer_active"]
             ),
         }
