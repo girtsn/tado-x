@@ -32,6 +32,7 @@ from .const import (
 )
 from .coordinator import TadoDataUpdateCoordinator
 from .entity import TadoHomeEntity, TadoZoneEntity
+from .presence_mode import effective_presence, selected_presence_mode
 from .room_override import room_override_report, observed_home_mode, _read_zone
 from .x_entities import (
     TadoXAdaptedFlowSensor,
@@ -262,6 +263,7 @@ async def async_setup_entry(
         ])
     if tado.is_x:
         entities.append(TadoXLastSuccessfulUpdateSensor(tado))
+        entities.append(TadoXEffectivePresenceSensor(tado))
     if tado.is_x and getattr(tado, "x_heating_modes", None):
         entities.append(TadoXHeatingHomeModeSensor(tado))
         entities.extend([
@@ -270,6 +272,34 @@ async def async_setup_entry(
         ])
     async_add_entities(entities, True)
 
+
+
+class TadoXEffectivePresenceSensor(TadoHomeEntity, SensorEntity):
+    """Actual Home/Away reported by Tado, independent of Auto/manual choice."""
+
+    _attr_name = "Effective presence"
+    _attr_icon = "mdi:home-map-marker"
+
+    def __init__(self, coordinator: TadoDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.home_id}_x_effective_presence"
+        # HA may append a suffix if another entity has claimed this ID.
+        self.entity_id = "sensor.tado_x_effective_presence"
+
+    @property
+    def native_value(self) -> str | None:
+        """Read from the same polled API data as the Home/Away/Auto select."""
+        return effective_presence(self.coordinator.data.get("geofence"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        return {
+            "tado_home_id": str(self.coordinator.home_id),
+            "presence_scope": "effective",
+            "selected_mode": selected_presence_mode(
+                self.coordinator.data.get("geofence")
+            ),
+        }
 
 
 class TadoXLastSuccessfulUpdateSensor(TadoHomeEntity, SensorEntity):
