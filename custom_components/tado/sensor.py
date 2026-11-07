@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 import logging
 from typing import Any
 
@@ -13,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import EntityCategory, PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -259,6 +260,8 @@ async def async_setup_entry(
             ),
             TadoXAdaptationEnabledPercentSensor(tado.x_settings, tado),
         ])
+    if tado.is_x:
+        entities.append(TadoXLastSuccessfulUpdateSensor(tado))
     if tado.is_x and getattr(tado, "x_heating_modes", None):
         entities.append(TadoXHeatingHomeModeSensor(tado))
         entities.extend([
@@ -266,6 +269,36 @@ async def async_setup_entry(
             for zone in tado.zones
         ])
     async_add_entities(entities, True)
+
+
+
+class TadoXLastSuccessfulUpdateSensor(TadoHomeEntity, SensorEntity):
+    """Last successful complete main tado X API poll, retained during outages."""
+
+    _attr_name = "tado X last successful update"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.home_id}_x_last_successful_update"
+        self.entity_id = "sensor.tado_x_last_successful_update"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_successful_update
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "tado_home_id": str(self.coordinator.home_id),
+            "connectivity_scope": "main_api",
+            "read_only": True,
+        }
 
 
 class TadoXRoomScheduleControlSensor(TadoZoneEntity, SensorEntity):
