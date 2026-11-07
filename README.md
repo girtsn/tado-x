@@ -1,5 +1,32 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.19 — cloud API connectivity and stale-update detection
+
+Read-only **tado X API cloud connection state**, **tado X settings cloud
+connection state** and **tado X last successful update** entities are added
+under the tado home device. The main API and the separately polled DHW/flow
+settings API are monitored independently, including stale data (15 minutes
+and 95 minutes respectively). The diagnostics continue to report a state even
+if the coordinator fails; last-success timestamps remain visible.
+
+The integration-managed Heating panel displays live cloud health above both
+tabs; the standalone heating-history card includes the same status strip.
+These status indicators use only Home Assistant state and do not poll the
+tado cloud from the browser.
+
+Update through HACS and restart Home Assistant. To add offline/recovered
+email alerts, **replace the existing Home Assistant automation manually**
+with [examples/device_availability_dynamic_email.yaml](examples/device_availability_dynamic_email.yaml).
+The example preserves the existing Foscam/TV exclusions, 5-minute delay,
+and recovery-only-after-outage logic, while monitoring *both* tado API
+sensors even though they share one device. The HACS integration cannot
+change user-owned Home Assistant automations automatically.
+
+The diagnostic sensors can report cloud loss while HA is running and the
+integration has completed its initial setup. An outage that prevents the
+integration from loading at all on HA startup requires a separate
+Home Assistant startup/integration-health watchdog.
+
 
 ## v2026.11.18 — one history date picker across Heating cards
 
