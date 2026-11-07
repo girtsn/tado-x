@@ -33,7 +33,7 @@ jobs:
           base = Path('custom_components/tado')
           manifest=json.loads((base/'manifest.json').read_text())
           assert manifest['domain']=='tado'
-          assert manifest['version']=='2026.11.12'
+          assert manifest['version']=='2026.11.13'
           json.loads((base/'strings.json').read_text())
           json.loads((base/'translations/en.json').read_text())
           PY
