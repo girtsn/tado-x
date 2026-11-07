@@ -43,6 +43,10 @@ def _parse_due(value: object) -> datetime | None:
     return due.astimezone(timezone.utc) if due.tzinfo else None
 
 
+class AdaptationRestoreError(HomeAssistantError):
+    """Schedules resumed, but automatic flow adaptation still needs recovery."""
+
+
 class HeatingModeManager:
     """Persisted, serialised tado X whole-home heating mode control."""
 
@@ -163,7 +167,7 @@ class HeatingModeManager:
                 + ("also failed" if adapt_error else "checked")
             ) from resume_error
         if adapt_error:
-            raise HomeAssistantError(
+            raise AdaptationRestoreError(
                 "Schedules resumed but automatic flow adaptation could not "
                 "be restored; will retry"
             ) from adapt_error
@@ -189,13 +193,18 @@ class HeatingModeManager:
                 await self._set_pending(None)
                 _LOGGER.info("tado X Top Boost restoration completed")
             except Exception as err:
-                self._last_error = str(err)
+                # Resume already succeeded: retry ONLY enabling adaptation,
+                # never reset any room changes made in the meantime.
+                retry_kind = (
+                    "adapt_only" if isinstance(err, AdaptationRestoreError)
+                    else kind
+                )
                 _LOGGER.warning(
                     "tado X heating recovery incomplete; retry in %d minutes: %s",
                     RECOVERY_RETRY_MINUTES, err,
                 )
                 await self._set_pending(
-                    kind, utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
+                    retry_kind, utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
                 )
                 self._last_error = str(err)
             return self.status()
@@ -216,24 +225,40 @@ class HeatingModeManager:
                 # crash or restart cannot leave the system disabled forever.
                 deadline = utcnow() + timedelta(minutes=TOP_BOOST_MINUTES)
                 await self._set_pending("resume_and_adapt", deadline)
+                boost_attempted = False
                 try:
                     await self.client.set_flow(enabled=False)
                     if self.coordinator.x_settings:
                         await self.coordinator.x_settings.async_request_refresh()
+                    boost_attempted = True
                     result = await self.client.heating_quick_action("boost")
                 except Exception:
-                    # Failure before successful boost: restore NOW, not in 30m.
-                    await self._set_pending("resume_and_adapt", utcnow())
+                    # If the boost was never sent, do NOT resume schedules:
+                    # manually configured rooms must remain untouched.
+                    # If it may have been sent, resume to undo an unknown
+                    # partial boost and restore adaptation immediately.
+                    recovery_kind = (
+                        "resume_and_adapt" if boost_attempted else "adapt_only"
+                    )
+                    await self._set_pending(recovery_kind, utcnow())
                     try:
-                        await self._resume_and_adapt()
+                        if boost_attempted:
+                            await self._resume_and_adapt()
+                        else:
+                            await self._ensure_adaptation_enabled()
                         await self._set_pending(None)
                     except Exception as recovery_error:
                         _LOGGER.warning(
                             "Top Boost failed and immediate recovery failed: %s",
                             recovery_error,
                         )
+                        retry_kind = (
+                            "adapt_only"
+                            if isinstance(recovery_error, AdaptationRestoreError)
+                            else recovery_kind
+                        )
                         await self._set_pending(
-                            "resume_and_adapt",
+                            retry_kind,
                             utcnow() + timedelta(minutes=RECOVERY_RETRY_MINUTES)
                         )
                     raise
