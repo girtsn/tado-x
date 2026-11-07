@@ -1,5 +1,43 @@
 # tado X integration — Home Assistant fork
 
+## New in 2026.11.8 — permanent settings history
+
+The existing editable `number` and `switch` entities are not sufficient to
+guarantee long-term statistics beyond the Recorder state-retention window.
+This release adds four independent **read-only sensor** histories for:
+
+- `DHW target temperature history` (°C)
+- `Maximum flow temperature history` (°C)
+- `Optimised heating flow limit` (°C; already present in v2026.11.7)
+- `Flow adaptation enabled percentage` (0 or 100% state, where monthly
+  averages approximate the percentage of time automatic adaptation was enabled)
+
+All use `state_class: measurement`, so Home Assistant stores hourly long-term
+statistics instead of relying solely on short-term Recorder state history.
+These histories **begin at installation**, not retroactively.
+
+The new third custom card discovers sensors and control entities automatically
+from their unique Home Assistant names, displays current values, and draws
+24-hour / 7-day / 90-day / one-year / three-year graphs using local Recorder
+statistics. Click a settings value to open its native Home Assistant control.
+
+Register the resource as a **JavaScript module**:
+
+`/tado/x-settings-history-card.js?v=2026.11.8`
+
+Add to a Lovelace dashboard:
+
+```yaml
+type: custom:tado-x-settings-history-card
+title: Hot-water and heating optimisation
+```
+
+This also fixes a cumulative-sum calculation bug in the optional Vaillant
+hourly heating allocation that could manifest when processing more than one
+hour in a single batch. It does **not** change or recreate any original
+Vaillant Recorder statistics.
+
+
 This is the user's maintained **tado** custom integration fork, based on the
 [original tado OAuth device-flow implementation](https://github.com/karlbeecken/ha-core/tree/tado-oauth-deviceflow/homeassistant/components/tado).
 It keeps the core `tado` domain and existing HA config entries, entities and
