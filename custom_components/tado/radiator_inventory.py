@@ -33,7 +33,6 @@ class Radiator:
     height_mm: int
     length_mm: int
     rated_output_w: int
-    inferred: bool = False
 
 
 RADIATORS = (
@@ -47,9 +46,9 @@ RADIATORS = (
     Radiator("R08", "1fl", "Bathroom", "Compact 4", "T33", 500, 600, 1212),
     Radiator("R09", "2fl", "Attic bedroom", "Uni.8 SP-08", "T33", 700, 1200, 3269),
     Radiator("R10", "2fl", "Attic bedroom", "Uni.8 SP-08", "T33", 700, 1200, 3269),
-    # Carried forward from the user's original list, missing in the R01–R10
-    # correction. Explicitly marked, never presented as newly confirmed.
-    Radiator("R11", "2fl", "Attic bathroom", "Uni.8 SP-08", "T33", 700, 1200, 3269, True),
+    # R11 is the attic-bathroom radiator from the original physical inventory.
+    # All Rxx identifiers refer to physical radiators, not tado room IDs.
+    Radiator("R11", "2fl", "Attic bathroom", "Uni.8 SP-08", "T33", 700, 1200, 3269),
 )
 
 RATING = "EN442 75/65/20 °C (Delta-T50)"
@@ -115,16 +114,22 @@ def _get_room_group(name: str) -> str | None:
 
 def _room_valve_count(zone: dict[str, Any]) -> int | None:
     devices = zone.get("devices")
-    if not isinstance(devices, list):
+    if not isinstance(devices, list) or not devices:
         return None
-    return sum(
-        1 for d in devices
-        if isinstance(d, dict) and str(d.get("type", d.get("deviceType", ""))).startswith("VA")
-    )
+    known = [d for d in devices if isinstance(d, dict)
+             and isinstance(d.get("type", d.get("deviceType")), str)]
+    if len(known) != len(devices):
+        # Avoid falsely asserting a mismatch for an inventory without types.
+        return None
+    return sum(str(d.get("type", d.get("deviceType", ""))).startswith("VA")
+               for d in known)
 
 
-def radiator_capacity_report(zones: list[dict[str, Any]],
-                             overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+def radiator_capacity_report(
+    zones: list[dict[str, Any]],
+    overrides: dict[str, Any] | None = None,
+    assignments: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Report conservative tado-room-to-physical-radiator matches.
 
     Only unambiguous exact aliases are auto-mapped. If two HA rooms match a
@@ -132,7 +137,13 @@ def radiator_capacity_report(zones: list[dict[str, Any]],
     is reported, never silently equated with physical heat output.
     """
     overrides = overrides if isinstance(overrides, dict) else {}
-    matched = [_get_room_group(str(z.get("name", ""))) for z in zones]
+    assignments = assignments if isinstance(assignments, dict) else {}
+    matched = [
+        assignments.get(str(z["id"])) if str(z["id"]) in assignments
+        else _get_room_group(str(z.get("name", "")))
+        for z in zones
+    ]
+    matched = [group if group in GROUP_PHYSICAL_IDS else None for group in matched]
     counts = Counter(group for group in matched if group is not None)
     output: list[dict[str, Any]] = []
     total_rated_w = 0
@@ -149,27 +160,28 @@ def radiator_capacity_report(zones: list[dict[str, Any]],
         expected = len(physical) if physical else None
         status = (
             "ambiguous_multiple_tado_zones" if ambiguous
-            else "unmatched_needs_manual_wattage" if not physical
+            else "unmatched_needs_room_mapping" if not physical
             else "valve_count_mismatch_review" if valve_count is not None and valve_count != expected
-            else "matched_inferred_r11" if any(r.inferred for r in physical)
             else "matched"
         )
         overridden = overrides.get(zid)
         manual_kw = float(overridden) if type(overridden) in (int, float) and math.isfinite(overridden) and overridden > 0 else None
         # Only a positive, unique group match is used as a rated-output
         # default; mismatched valve counts require a user review.
-        inferred_kw = round(rated_w / 1000, 3) if status in ("matched", "matched_inferred_r11") else None
-        default_kw = inferred_kw
+        default_kw = round(rated_w / 1000, 3) if status == "matched" else None
         effective_kw = manual_kw if manual_kw is not None else default_kw
         output.append({
             "room_id": int(zone["id"]), "room": name,
             "status": status, "source": "manual_override" if manual_kw is not None else (
                 "installed_radiator_inventory" if default_kw is not None else "unset"),
+            "room_group": group,
+            "room_mapping": "manual_room_assignment" if zid in assignments
+                            else "name_match" if group else "unmatched",
             "radiator_ids": [r.physical_id for r in physical],
             "radiators": [{"id": r.physical_id,
                            "series": r.series, "type": r.radiator_type,
                            "height_mm": r.height_mm, "length_mm": r.length_mm,
-                           "rated_w": r.rated_output_w, "inferred": r.inferred}
+                           "rated_w": r.rated_output_w}
                           for r in physical],
             "rated_w": rated_w if physical else None,
             "capacity_kw": effective_kw,
@@ -183,18 +195,22 @@ def radiator_capacity_report(zones: list[dict[str, Any]],
     return {
         "rating": RATING,
         "total_inventory_w": sum(r.rated_output_w for r in RADIATORS),
-        "includes_inferred_r11": True,
+        "physical_radiators": len(RADIATORS),
+        "radiator_rooms": len(GROUP_PHYSICAL_IDS),
         "matched_rated_w": mapped_rated_w,
         "matched_rooms": sum(row["capacity_kw"] is not None for row in output),
         "rooms": output,
-        "note": "Nominal output at 75/65/20; relative heating allocation weights only. Unmatched rooms require a manually entered capacity. R11 came from the earlier inventory and remains unconfirmed.",
+        "note": "R01–R11 are physical radiator identifiers, not tado room identifiers. Attic bedroom R09+R10 totals 6538 W; attic bathroom R11 is separate. Outputs are nominal EN442 75/65/20; allocation uses relative room weighting. Unknown tado room names must be mapped explicitly before allocation.",
     }
 
 
-def require_valid_capacities(zones: list[dict[str, Any]],
-                             overrides: dict[str, Any] | None = None) -> dict[str, float]:
+def require_valid_capacities(
+    zones: list[dict[str, Any]],
+    overrides: dict[str, Any] | None = None,
+    assignments: dict[str, str] | None = None,
+) -> dict[str, float]:
     """Never replace an unknown radiator with a fabricated 1 kW weight."""
-    report = radiator_capacity_report(zones, overrides)
+    report = radiator_capacity_report(zones, overrides, assignments)
     missing = [r["room"] for r in report["rooms"] if r["capacity_kw"] is None]
     if missing:
         raise HomeAssistantError(
