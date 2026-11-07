@@ -25,6 +25,8 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     CONF_FALLBACK,
     CONF_REFRESH_TOKEN,
+    CONF_X_HOME_ENERGY,
+    CONF_X_LEGACY_ENERGY_PROBE,
     CONST_OVERLAY_MANUAL,
     CONST_OVERLAY_TADO_DEFAULT,
     CONST_OVERLAY_TADO_MODE,
@@ -37,6 +39,7 @@ from .services import setup_services
 from .tadox_ext import TadoXSettingsCoordinator
 from .heating_modes import HeatingModeManager
 from .heat_allocation import allocate_recent
+from .x_features import energy_enabled, restore_used_legacy_energy_option
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -121,6 +124,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
 
     coordinator = TadoDataUpdateCoordinator(hass, entry, tado)
     await coordinator.async_config_entry_first_refresh()
+    entry.async_on_unload(coordinator.cancel_post_action_room_refresh)
+
+    # Preserve the original household's existing Vaillant allocations on
+    # upgrade, without activating hard-coded radiator extras for other homes.
+    await restore_used_legacy_energy_option(hass, entry, coordinator)
 
     mobile_coordinator = TadoMobileDeviceUpdateCoordinator(hass, entry, tado, coordinator)
     await mobile_coordinator.async_config_entry_first_refresh()
@@ -134,6 +142,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             # Optional HOPS settings should never take down working tado heating.
             _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
+    if coordinator.is_x:
+        # Generic tado X actions belong to all installations. Register the
+        # Vaillant/radiator actions only for an explicitly opted-in home.
+        setup_services(hass, extras=True, household=energy_enabled(entry))
     coordinator.x_heating_modes = None
     if coordinator.is_x:
         # Read the saved UTC Top Boost recovery before installing entities.
@@ -143,7 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
         entry.async_on_unload(coordinator.x_heating_modes.async_stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    if coordinator.is_x:
+    if coordinator.is_x and energy_enabled(entry):
         coordinator.x_allocation_lock = asyncio.Lock()
 
         @callback
@@ -175,12 +187,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bo
     """Migrate old entry."""
 
     if entry.version < 2:
-        _LOGGER.debug("Migrating Tado entry to version 2. Current data: %s", entry.data)
+        # Do not log credentials or refresh tokens.
         data = dict(entry.data)
         data.pop(CONF_USERNAME, None)
         data.pop(CONF_PASSWORD, None)
         hass.config_entries.async_update_entry(entry=entry, data=data, version=2)
-        _LOGGER.debug("Migration to version 2 successful")
+        _LOGGER.debug("Migration to Tado entry version 2 successful")
+
+    if entry.version < 3:
+        # All tado X features remain enabled for all users; only household
+        # Vaillant/radiator energy estimation is opt-in. Preserve it when
+        # pre-existing v2 room-estimate statistics prove previous use.
+        opts = dict(entry.options)
+        if CONF_X_HOME_ENERGY not in opts:
+            opts[CONF_X_HOME_ENERGY] = False
+            opts[CONF_X_LEGACY_ENERGY_PROBE] = True
+        hass.config_entries.async_update_entry(
+            entry=entry, options=opts, version=3
+        )
+        _LOGGER.info("Migrated tado options to opt-in feature flags")
     return True
 
 

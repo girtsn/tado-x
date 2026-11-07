@@ -30,6 +30,8 @@ from homeassistant.helpers.service_info.zeroconf import (
 from .const import (
     CONF_FALLBACK,
     CONF_REFRESH_TOKEN,
+    CONF_X_HOME_ENERGY,
+    CONF_X_LEGACY_ENERGY_PROBE,
     CONST_OVERLAY_TADO_DEFAULT,
     CONST_OVERLAY_TADO_OPTIONS,
     DOMAIN,
@@ -41,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 class TadoConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Tado."""
 
-    VERSION = 2
+    VERSION = 3
     login_task: asyncio.Task | None = None
     refresh_token: str | None = None
     tado: Tado | None = None
@@ -190,8 +192,17 @@ class OptionsFlowHandler(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle options flow."""
-        if user_input:
-            result = self.async_create_entry(data=user_input)
+        if user_input is not None:
+            # Keep private per-room capacities and mapping overrides. HA
+            # options forms submit only the visible fields, not the hidden
+            # options used by existing allocations.
+            options = {
+                **self.config_entry.options,
+                **user_input,
+                # A direct user choice wins over any pending upgrade probe.
+                CONF_X_LEGACY_ENERGY_PROBE: False,
+            }
+            result = self.async_create_entry(data=options)
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
             return result
 
@@ -203,6 +214,10 @@ class OptionsFlowHandler(OptionsFlow):
                         CONF_FALLBACK, CONST_OVERLAY_TADO_DEFAULT
                     ),
                 ): vol.In(CONST_OVERLAY_TADO_OPTIONS),
+                vol.Optional(
+                    CONF_X_HOME_ENERGY,
+                    default=self.config_entry.options.get(CONF_X_HOME_ENERGY, False),
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=data_schema)

@@ -67,6 +67,10 @@ class FakeCoordinator:
 
     def __init__(self):
         self.notified = 0
+        self.post_action_polls_scheduled = 0
+
+    def schedule_post_action_room_refresh(self):
+        self.post_action_polls_scheduled += 1
 
     def async_update_listeners(self):
         self.notified += 1
@@ -224,6 +228,20 @@ class HeatingModeTests(unittest.TestCase):
             self.assertFalse(m.status()["pending"])
             self.assertEqual(m.status()["mode"], "schedule")
 
+        asyncio.run(exercise())
+
+    def test_each_heating_action_queues_a_room_state_readback(self):
+        async def exercise():
+            m = await self.manager()
+            await m.async_action("resume")
+            await m.async_action("eco_boost")
+            await m.async_action("top_boost")
+            await m.async_action("off")
+            self.assertEqual(self.coord.post_action_polls_scheduled, 4)
+            await m.async_action("eco_boost")
+            with patch.object(module, "utcnow", return_value=self.now + timedelta(minutes=31)):
+                await m.async_recover()
+            self.assertEqual(self.coord.post_action_polls_scheduled, 6)
         asyncio.run(exercise())
 
     def test_legacy_boost_is_restart_safe_eco(self):

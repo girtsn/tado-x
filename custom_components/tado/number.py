@@ -5,6 +5,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
 from .x_entities import TadoXDhwSetpointNumber, TadoXFlowMaxNumber, TadoXRoomCapacityNumber
+from .x_features import energy_enabled
 
 
 async def async_setup_entry(
@@ -12,10 +13,18 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     main = entry.runtime_data.coordinator
-    if not main.is_x or main.x_settings is None:
+    if not main.is_x:
         return
-    async_add_entities([
-        TadoXDhwSetpointNumber(main.x_settings, main),
-        TadoXFlowMaxNumber(main.x_settings, main),
-        *[TadoXRoomCapacityNumber(main, zone) for zone in main.zones],
-    ])
+    entities = []
+    if main.x_settings is not None:
+        entities.extend([
+            TadoXDhwSetpointNumber(main.x_settings, main),
+            TadoXFlowMaxNumber(main.x_settings, main),
+        ])
+    if energy_enabled(entry):
+        # Your installed-radiator model is house-specific. Do not create
+        # its per-room number entities for new users unless they opt in.
+        entities.extend(TadoXRoomCapacityNumber(main, zone)
+                        for zone in main.zones)
+    if entities:
+        async_add_entities(entities)

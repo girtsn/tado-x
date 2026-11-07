@@ -26,9 +26,10 @@
       "init": {
         "description": "Fallback mode lets you choose when to fallback to Smart Schedule from your manual zone overlay. (NEXT_TIME_BLOCK:= Change at next Smart Schedule change; MANUAL:= Don't change until you cancel; TADO_DEFAULT:= Change based on your setting in the Tado app).",
         "data": {
-          "fallback": "Choose fallback mode."
+          "fallback": "Choose fallback mode.",
+          "x_household_energy": "Enable optional Vaillant/myPyllant gas allocation and household-specific radiator inventory (only for an installation configured for these)"
         },
-        "title": "Adjust Tado options."
+        "title": "Tado integration options"
       }
     }
   },

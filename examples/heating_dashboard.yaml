@@ -1,3 +1,6 @@
+# General-purpose Heating dashboard for tado X.
+# No Vaillant, myPyllant or particular home's installed radiator inventory.
+# The three core cards are served by the public tado integration.
 title: Heating
 views:
   - title: Overview
@@ -14,60 +17,36 @@ views:
             icon: mdi:heating-coil
           - type: custom:tado-x-settings-history-card
             title: Heating flow, hot water and outdoor temperature
-            # Optional: choose a particular outdoor sensor below.
-            # outdoor_entity: sensor.your_outdoor_temperature
+            # Optional weather sensor override:
+            # outdoor_entity: sensor.outdoor_temperature
             grid_options:
               columns: full
       - type: grid
         cards:
           - type: heading
-            heading: System overview
+            heading: Heating controls
             heading_style: title
-            icon: mdi:radiator
+            icon: mdi:home-thermometer
           - type: markdown
             content: |-
-              **Whole-home quick actions**
+              **Whole-home tado X heating actions**
 
-              The card lets you turn heating off (frost protection),
-              resume all room Smart Schedules or boost all rooms for
-              30 minutes. These actions do not control hot water.
+              - Heating Off: enter frost protection
+              - Resume Schedules: restore room schedules
+                and automatic flow adaptation
+              - Eco Boost: 30-minute maximum room heating
+                with automatic flow adaptation enabled
+              - Top Boost: 30-minute maximum room heating
+                with automatic flow adaptation temporarily off
 
-              **Radiator inventory:** 11 in 10 heating rooms;
-              25.748 kW EN442 nominal output.
-              Attic bedroom has two radiators, 6.538 kW total.
+              Both boosts have a restart-safe recovery deadline.
+              The mode indicator compares saved actions with
+              the currently reported room schedule status.
 
-              Calculated tado flow limits are not measured boiler flow.
+              Temperature limits are targets and calculations,
+              not actual measured boiler outlet temperature.
             grid_options:
               columns: full
-
-  - title: Consumption
-    path: consumption
-    icon: mdi:chart-line
-    type: sections
-    max_columns: 1
-    sections:
-      - type: grid
-        cards:
-          - type: heading
-            heading: Heating gas allocated to rooms
-            heading_style: title
-            icon: mdi:fire
-          - type: custom:tado-x-heating-energy-card
-            title: Estimated heating gas input by room
-            grid_options:
-              columns: full
-          - type: markdown
-            content: |-
-              **Historical data caveat:** Vaillant's older daily gas
-              backfill was divided into equal hourly buckets. Historical
-              room allocations from before 3 November 2026 are provisional,
-              until a separate daily-weighted allocation is available.
-
-              The room kWh values are modelled shares of gas *input*,
-              not direct measurements of radiator heat delivered.
-            grid_options:
-              columns: full
-
   - title: Schedules
     path: schedules
     icon: mdi:calendar-clock
@@ -77,17 +56,18 @@ views:
       - type: grid
         cards:
           - type: heading
-            heading: Weekly heating schedules
+            heading: Room heating programmes
             heading_style: title
             icon: mdi:calendar-clock
           - type: custom:tado-x-schedule-card
-            title: tado X room schedule editor
+            title: tado X weekly room schedules
             grid_options:
               columns: full
           - type: markdown
             content: >-
-              Edit, copy and save weekly room time blocks. Saved changes
-              are verified against tado. Whole-home Resume Schedule cancels
-              manual room overrides; it does not rewrite your programmes.
+              All room schedule controls use tado X APIs.
+              Changes to programmes are sent only when saved.
+              Room-level schedule status is also available
+              as standard Home Assistant sensors.
             grid_options:
               columns: full
