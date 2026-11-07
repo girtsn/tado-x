@@ -78,6 +78,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             "zone": {},
         }
         self.is_x = False
+        self._post_action_refresh_task: asyncio.Task | None = None
+        self._post_action_refresh_lock = asyncio.Lock()
 
     @property
     def fallback(self) -> str:
@@ -219,6 +221,45 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             mapped_devices[device_short_serial_no] = device
 
         return mapped_devices
+
+    def schedule_post_action_room_refresh(self, *, delay: float = 3.0) -> None:
+        """Coalesce quick-action readbacks; no extra baseline polling.
+
+        Allow tado HOPS a few seconds to apply the command, then read actual
+        room overlays through the same PyTado API and shared OAuth lock.
+        Refresh *only room states*, not all devices, weather or presence.
+        """
+        if not self.is_x:
+            return
+        previous = self._post_action_refresh_task
+        if previous is not None and not previous.done():
+            previous.cancel()
+        self._post_action_refresh_task = self.hass.async_create_task(
+            self._async_post_action_room_refresh(delay)
+        )
+
+    async def _async_post_action_room_refresh(self, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            async with self._post_action_refresh_lock:
+                rooms = await self._async_update_zones()
+                self.async_set_updated_data({**self.data, "zone": rooms})
+                _LOGGER.debug("tado X room controls confirmed by post-action poll")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A failed readback is never proof that a write failed. The
+            # normal 5-minute poll remains the fallback.
+            _LOGGER.warning(
+                "Post-action tado X room readback failed; next normal poll "
+                "will retry", exc_info=True,
+            )
+
+    def cancel_post_action_room_refresh(self) -> None:
+        task = self._post_action_refresh_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._post_action_refresh_task = None
 
     async def _async_update_zones(self) -> dict[int, dict]:
         """Update the zone data from Tado."""
