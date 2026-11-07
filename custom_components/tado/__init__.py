@@ -172,7 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
                 frontend_url_path="tado-x-heating",
                 webcomponent_name="tado-x-managed-heating-panel",
                 sidebar_title="tado X Heating",
-                sidebar_icon="mdi:home-thermometer",
+                sidebar_icon="mdi:gas-burner",
                 module_url=f"/tado/x-managed-panel.js?v={INTEGRATION_VERSION}",
                 config={
                     "config_entry": entry.entry_id,
