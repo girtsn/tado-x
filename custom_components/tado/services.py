@@ -282,7 +282,10 @@ def setup_services(
         async def x_estimate_history(call: ServiceCall) -> dict:
             main = get_x_coordinator(call, energy=True)
             return await allocation_history(
-                hass, main, period=call.data.get("period", "month")
+                hass, main,
+                period=call.data.get("period", "month"),
+                start_date=call.data.get("start_date"),
+                end_date=call.data.get("end_date"),
             )
 
         hass.services.async_register(
@@ -295,7 +298,10 @@ def setup_services(
         hass.services.async_register(
             DOMAIN, "x_heating_allocation_history", x_estimate_history,
             schema=vol.Schema({**home, vol.Optional("period", default="month"):
-                               vol.In(["day", "week", "month", "year", "3years"])}),
+                               vol.In(["day", "week", "month", "year", "3years", "custom"]),
+                vol.Optional("start_date"): vol.Match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+                vol.Optional("end_date"): vol.Match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+            }),
             supports_response=SupportsResponse.ONLY,
         )
 

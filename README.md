@@ -1,6 +1,37 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.18 — calendar-period energy history, 3 years and gas sidebar icon
+
+The existing optional Vaillant consumption card now has **Day, Week, Month,
+Year, 3 years, and Custom range** navigation. Its Month view is a *calendar
+month*, not the previous 33 days. Previous/next arrows, a date picker and a
+Current shortcut control the entire card — room totals, unallocated gas and
+trends together. The previous selection is restored on this phone/browser
+using local storage (not synchronised between devices).
+
+The 3-years setting shows **36 calendar months** ending with the selected
+month, and moves between 36-month blocks. Longer ranges use efficient
+Recorder monthly statistics with exact hourly boundary months; short
+periods use hourly data in the Home Assistant timezone and handle the
+25-hour October DST day without merging the two occurrences of 02:00.
+
+The `tado.x_heating_allocation_history` action can also retrieve an inclusive
+range by adding both `start_date` and `end_date`, as YYYY-MM-DD; existing
+service calls without date parameters remain compatible.
+
+The integration-managed Heating sidebar icon is now **`mdi:gas-burner`**.
+A pre-existing manual Lovelace dashboard icon is configured separately
+in Settings → Dashboards → Icon. HACS updates manage the built-in sidebar
+panel automatically; old manually created dashboards are not overwritten.
+
+**Important:** Available years of charts are limited to *existing*
+room-allocation Recorder statistics. Earlier Vaillant gas-hours reconstructed
+from daily totals remain provisional; this release does not change recorded
+consumption, water, heating schedules or radiator control settings.
+
+
+
 ## v2026.11.17 — managed Heating panel cache busting
 
 The automatically installed `tado X Heating` sidebar panel now uses a

@@ -243,8 +243,14 @@ x_compute_heating_allocation:
           integration: tado
 
 x_heating_allocation_history:
-  name: Read estimated per-room heating gas history
-  description: Local Recorder only, returning hourly, daily or monthly summaries for dashboards.
+  name: Read per-room heating gas for a calendar date range
+  description: >-
+    Read-only Vaillant-based room gas estimates in local Home Assistant calendar
+    time. Supply both inclusive start_date and end_date (YYYY-MM-DD) to request
+    an exact period, including 23/25-hour DST dates. Day and short ranges use
+    true hourly Recorder allocation rows; years and 3-year ranges use monthly
+    summaries with hourly partial-month boundaries. No source data is modified.
+    If dates are omitted, the legacy rolling-period behaviour is preserved.
   fields:
     period:
       required: false
@@ -257,6 +263,17 @@ x_heating_allocation_history:
             - month
             - year
             - 3years
+            - custom
+    start_date:
+      required: false
+      description: Inclusive Brussels-local start day, e.g. 2026-11-01.
+      selector:
+        date:
+    end_date:
+      required: false
+      description: Inclusive Brussels-local end day, e.g. 2026-11-07.
+      selector:
+        date:
     config_entry:
       required: false
       selector:
