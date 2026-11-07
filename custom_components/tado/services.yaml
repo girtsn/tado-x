@@ -371,3 +371,31 @@ x_diagnose_unallocated_heating:
       selector:
         config_entry:
           integration: tado
+
+x_heating_quick_action:
+  name: Whole-home tado X heating quick action
+  description: >-
+    Explicitly control ALL tado X heating rooms with one home-wide HOPS
+    quickActions request, like the app. Action 'off' enables frost protection
+    until resumed, 'resume' cancels manual room overrides and restores their
+    smart schedules, and 'boost' requests maximum room setpoints for 30 minutes.
+    These actions exclude domestic hot water and DO NOT change flow temperature
+    adaptation or boiler settings. HTTPS acceptance is not confirmation that
+    physical radiator valves have changed; room states update on normal polling.
+  fields:
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - label: Turn heating off (all rooms, frost protection)
+              value: "off"
+            - label: Resume all room schedules
+              value: resume
+            - label: Boost all rooms for 30 minutes
+              value: boost
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
