@@ -396,7 +396,11 @@ async def allocation_history(
         "rooms": list(zones.values()),
         "series": [
             {"period": key, **{name: round(value, 5) for name, value in values.items()}}
-            for key, values in sorted(timeline.items())
+            for key, values in sorted(
+                timeline.items(),
+                key=lambda item: datetime.fromisoformat(item[0]).timestamp()
+                if grouping == "hour" else item[0]
+            )
         ],
         "note": (
             "Selected dates are inclusive in Home Assistant local time. "
