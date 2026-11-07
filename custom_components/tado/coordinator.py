@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -66,6 +66,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
             CONF_FALLBACK, CONST_OVERLAY_TADO_DEFAULT
         )
         self._debug = debug
+        self.last_successful_update = None
+        self.last_failure_reason = None
 
         self.home_id: int
         self.home_name: str
@@ -113,6 +115,14 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
                     _LOGGER.exception("Unable to persist refreshed Tado authentication")
 
     async def _async_update_data(self) -> dict[str, dict]:
+        """Track API poll success separately from individual device state."""
+        try:
+            return await self._async_fetch_snapshot()
+        except Exception as err:
+            self.last_failure_reason = f"{type(err).__name__}: {str(err)[:180]}"
+            raise
+
+    async def _async_fetch_snapshot(self) -> dict[str, dict]:
         """Fetch the (initial) latest data from Tado."""
 
         try:
@@ -150,7 +160,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         self.data["zone"] = zones
         self.data["weather"] = home["weather"]
         self.data["geofence"] = home["geofence"]
-
+        self.last_successful_update = datetime.now(timezone.utc)
+        self.last_failure_reason = None
         return self.data
 
     async def _async_update_devices(self) -> dict[str, dict]:
