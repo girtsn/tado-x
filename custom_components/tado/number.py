@@ -5,7 +5,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import TadoConfigEntry
 from .x_entities import TadoXDhwSetpointNumber, TadoXFlowMaxNumber, TadoXRoomCapacityNumber
-from .x_features import advanced_enabled, energy_enabled
+from .x_features import energy_enabled
 
 
 async def async_setup_entry(
@@ -16,7 +16,7 @@ async def async_setup_entry(
     if not main.is_x:
         return
     entities = []
-    if advanced_enabled(entry) and main.x_settings is not None:
+    if main.x_settings is not None:
         entities.extend([
             TadoXDhwSetpointNumber(main.x_settings, main),
             TadoXFlowMaxNumber(main.x_settings, main),
