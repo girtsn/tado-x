@@ -109,6 +109,30 @@ class TadoXClient:
         return {"confirmed": confirmed, "room_id": room_id, "day": day,
                 "signature": schedule_signature(canonical_day(actual, day))}
 
+    async def heating_quick_action(self, action: str) -> dict:
+        """Perform an explicit whole-home heating quick action (one HOPS POST).
+
+        These commands do not control domestic hot water, and Boost Heating
+        does NOT intentionally change flow-temperature auto adaptation.
+        """
+        paths = {
+            "off": "quickActions/allOff",
+            "resume": "quickActions/resumeSchedule",
+            "boost": "quickActions/boost",
+        }
+        if action not in paths:
+            raise HomeAssistantError("Unsupported whole-home heating action")
+        result = await self.call("POST", paths[action])
+        return {
+            "action": action,
+            "accepted": True,
+            "affected": "all_tado_heating_rooms",
+            "dhw_changed": False,
+            "flow_adaptation_changed_by_integration": False,
+            "boost_duration_minutes": 30 if action == "boost" else None,
+            "response": result if isinstance(result, dict) else {},
+        }
+
     async def get_dhw(self):
         return await self.call("GET", "programmer/domesticHotWater/state")
 
