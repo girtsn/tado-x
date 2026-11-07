@@ -10,6 +10,7 @@ from homeassistant.helpers import selector
 
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import allocate_recent, allocation_history
+from .radiator_inventory import radiator_capacity_report
 
 from .const import (
     ATTR_MESSAGE,
@@ -223,4 +224,66 @@ def setup_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({**home, vol.Optional("period", default="month"):
                            vol.In(["day", "week", "month", "year", "3years"])}),
         supports_response=SupportsResponse.ONLY,
+    )
+
+    async def x_radiator_capacities(call: ServiceCall) -> dict:
+        """Show current tado room-to-physical-radiator mapping and rated W."""
+        main = get_x_coordinator(call)
+        return radiator_capacity_report(
+            main.zones, main.config_entry.options.get("x_capacity_kw", {})
+        )
+
+    async def x_apply_radiator_capacities(call: ServiceCall) -> dict:
+        """Persist only safely matched nominal capacities; never write tado."""
+        main = get_x_coordinator(call)
+        report = radiator_capacity_report(
+            main.zones, main.config_entry.options.get("x_capacity_kw", {})
+        )
+        entry = main.config_entry
+        values = dict(entry.options.get("x_capacity_kw", {}))
+        overwrite = call.data.get("overwrite_existing", False)
+        include_inferred = call.data.get("include_inferred_r11", False)
+        dry_run = call.data.get("dry_run", True)
+        updates = []
+        skipped = []
+        for room in report["rooms"]:
+            if room["status"] not in ("matched", "matched_inferred_r11"):
+                skipped.append({"room": room["room"], "reason": room["status"]})
+                continue
+            if room["status"] == "matched_inferred_r11" and not include_inferred:
+                skipped.append({"room": room["room"], "reason": "R11 requires confirmation"})
+                continue
+            rid = str(room["room_id"])
+            if not overwrite and rid in values:
+                skipped.append({"room": room["room"], "reason": "existing_manual_override_preserved"})
+                continue
+            value = round(float(room["rated_w"]) / 1000, 3)
+            values[rid] = value
+            updates.append({"room": room["room"], "room_id": room["room_id"], "kw": value})
+        if not dry_run and updates:
+            main.hass.config_entries.async_update_entry(
+                entry, options={**entry.options, "x_capacity_kw": values}
+            )
+            main.async_update_listeners()
+        return {
+            "status": "preview_only" if dry_run else "applied_locally",
+            "updated_rooms": updates,
+            "skipped_rooms": skipped,
+            "radiator_heating_settings_changed": False,
+            "boiler_settings_changed": False,
+            "source_statistics_modified": False,
+        }
+
+    hass.services.async_register(
+        DOMAIN, "x_radiator_capacity_report", x_radiator_capacities,
+        schema=vol.Schema(home), supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN, "x_apply_radiator_capacities", x_apply_radiator_capacities,
+        schema=vol.Schema({
+            **home,
+            vol.Optional("dry_run", default=True): bool,
+            vol.Optional("overwrite_existing", default=False): bool,
+            vol.Optional("include_inferred_r11", default=False): bool,
+        }), supports_response=SupportsResponse.OPTIONAL,
     )
