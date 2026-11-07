@@ -299,8 +299,8 @@ def setup_services(
             DOMAIN, "x_heating_allocation_history", x_estimate_history,
             schema=vol.Schema({**home, vol.Optional("period", default="month"):
                                vol.In(["day", "week", "month", "year", "3years", "custom"]),
-                vol.Optional("start_date"): vol.Match(r"^\\d{4}-\\d{2}-\\d{2}$"),
-                vol.Optional("end_date"): vol.Match(r"^\\d{4}-\\d{2}-\\d{2}$"),
+                vol.Optional("start_date"): vol.Match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+                vol.Optional("end_date"): vol.Match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
             }),
             supports_response=SupportsResponse.ONLY,
         )
