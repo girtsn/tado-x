@@ -70,7 +70,6 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         panel = (TADO / "www" / "tado-x-managed-panel.js").read_text()
         history = (TADO / "www" / "tado-x-settings-history-card.js").read_text()
         strip = (TADO / "www" / "tado-x-connectivity-status.js").read_text()
-        automation = (ROOT / "examples" / "device_availability_dynamic_email.yaml").read_text()
 
         for scope in ("main_api", "settings_api"):
             self.assertIn(f'"{scope}"', binary)
@@ -89,10 +88,10 @@ class ManagedHeatingPanelTests(unittest.TestCase):
         self.assertIn('tado-x-connectivity-status', history)
         self.assertIn('connectivity_scope', strip)
         self.assertIn('date-range-changed', panel)
-        self.assertIn('eid == ns.best or tado_api', automation)
-        self.assertIn('monitor_scope', automation)
-        self.assertIn('delay: "00:05:00"', automation)
-        self.assertIn('notify.email_girts', automation)
+        # No household notification automation is distributed via HACS.
+        self.assertFalse(
+            (ROOT / "examples" / "device_availability_dynamic_email.yaml").exists()
+        )
 
     def test_only_one_vaillant_option_not_advanced_tado_switches(self):
         flow = (TADO / "config_flow.py").read_text()
