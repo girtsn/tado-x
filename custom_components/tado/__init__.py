@@ -35,6 +35,7 @@ from .coordinator import TadoDataUpdateCoordinator, TadoMobileDeviceUpdateCoordi
 from .models import TadoData
 from .services import setup_services
 from .tadox_ext import TadoXSettingsCoordinator
+from .heating_modes import HeatingModeManager
 from .heat_allocation import allocate_recent
 
 PLATFORMS = [
@@ -133,6 +134,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             # Optional HOPS settings should never take down working tado heating.
             _LOGGER.warning("Unable to load optional tado X DHW/flow settings", exc_info=True)
     entry.runtime_data = TadoData(coordinator, mobile_coordinator)
+    coordinator.x_heating_modes = None
+    if coordinator.is_x:
+        # Read the saved UTC Top Boost recovery before installing entities.
+        # This may schedule a previously authorised recovery after HA restarts.
+        coordinator.x_heating_modes = HeatingModeManager(hass, coordinator)
+        await coordinator.x_heating_modes.async_start()
+        entry.async_on_unload(coordinator.x_heating_modes.async_stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     if coordinator.is_x:
