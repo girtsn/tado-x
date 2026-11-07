@@ -27,6 +27,8 @@ jobs:
           done
       - name: Test dashboard loader and hot-swap logic
         run: node tests/test_frontend_loader.cjs
+      - name: Test interactive chart tooltip
+        run: node tests/test_chart_hover_tooltip.cjs custom_components/tado/www/x-chart-hover-tooltip.js
       - name: Validate manifest and JSON translations
         run: |
           python - <<'PY'
