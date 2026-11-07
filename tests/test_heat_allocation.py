@@ -139,6 +139,71 @@ class AllocationTests(unittest.TestCase):
         self.assertAlmostEqual(room2[1]["sum"],2.5)
         self.assertEqual(result["unallocated_kwh"],0)
 
+    def test_diagnostic_separates_missing_from_all_zero_demand(self):
+        """Hourly cause must match production allocation's decision tree."""
+        tminus3 = (self.end-timedelta(hours=3)).timestamp()
+        raw = {
+            "mypyllant:heating": [
+                {"start": tminus3, "sum": 1000},
+                {"start": self.t0, "sum": 3000},
+                {"start": self.t1, "sum": 5000},
+            ],
+            "sensor.r1": [
+                {"start": self.t0, "mean": 25},
+                {"start": self.t1, "mean": 0},
+            ],
+            "sensor.r2": [
+                # Missing entire first hour: other room is actively heating.
+                {"start": self.t1, "mean": 0},
+            ],
+        }
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_fetch", fetch),
+        ):
+            result = asyncio.run(allocation.diagnose_unallocated(
+                self.hass, self.main, days=1, limit=30
+            ))
+        self.assertEqual(result["status"], "diagnostic_completed")
+        self.assertTrue(result["read_only"])
+        self.assertEqual(result["valid_gas_hours"], 2)
+        self.assertEqual(result["gas_kwh_in_valid_hours"], 4)
+        self.assertEqual(result["unallocated_kwh"], 4)
+        self.assertEqual(result["unallocated_percent"], 100)
+        causes = result["causes"]
+        missing = causes["missing_or_invalid_room_demand"]
+        zero = causes["all_rooms_zero_demand"]
+        self.assertEqual((missing["hours"], missing["gas_kwh"]), (1, 2))
+        self.assertEqual((zero["hours"], zero["gas_kwh"]), (1, 2))
+        self.assertEqual(missing["hours_with_other_rooms_active"], 1)
+        self.assertEqual(zero["hours_with_adjacent_demand"], 1)
+        self.assertEqual(result["missing_room_breakdown"][0]["room"], "Bath")
+        self.assertEqual(result["missing_room_breakdown"][0]["hours"], 1)
+        self.assertEqual(len(result["highest_unallocated_hours"]), 2)
+        self.assertEqual(len(result["days_with_unallocated"]), 1)
+
+    def test_diagnostic_does_not_count_gas_when_room_is_actively_heating(self):
+        raw = self.snapshots(room1_mean=25, room2_mean=75)
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_fetch", fetch),
+        ):
+            result = asyncio.run(allocation.diagnose_unallocated(
+                self.hass, self.main, days=1
+            ))
+        self.assertEqual(result["gas_kwh_in_valid_hours"], 2)
+        self.assertEqual(result["unallocated_kwh"], 0)
+        self.assertEqual(result["total_unallocated_hours"], 0)
+        self.assertFalse(result["missing_room_breakdown"])
+
     def test_dry_run_writes_nothing(self):
         result=asyncio.run(self.run_case(self.snapshots(),dry_run=True))
         self.assertEqual(result["status"],"dry_run")
