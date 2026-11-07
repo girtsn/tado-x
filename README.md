@@ -1,6 +1,39 @@
 # tado X integration — Home Assistant fork
 
 
+## v2026.11.16 — self-updating Heating panel (no YAML maintenance)
+
+The integration automatically installs a **tado X Heating** sidebar panel
+at `/tado-x-heating` using Home Assistant's custom-panel extension. The panel
+bundles the three existing custom cards, including heating flow/DHW controls,
+home heating modes (Off, Resume, Eco Boost and Top Boost), live room schedule
+status, the 30-minute recovery countdown, and the weekly editor.
+
+The **Vaillant/myPyllant consumption view appears automatically only when
+the existing household energy option is enabled**. No separate dashboard
+definition, Lovelace resource registration, helper entity or YAML automation
+is required for the managed panel. This gets updated through normal HACS
+releases plus a Home Assistant restart.
+
+**Existing manually built dashboards are not replaced.** If you already
+created a `Heating` Lovelace dashboard, the new `tado X Heating` panel
+is a second sidebar item. Verify the managed panel, then optionally hide
+the older one in Home Assistant's sidebar controls.
+
+For installations that prefer a traditional editable Lovelace YAML dashboard,
+[examples/heating_dashboard.yaml](examples/heating_dashboard.yaml) remains a
+single canonical example with a conditional Vaillant section controlled by
+the read-only `binary_sensor.tado_x_vaillant_energy_enabled`. This sensor
+mirrors the sole optional household energy setting; it does not create
+another option.
+
+**Heating mode recovery is already implemented inside the integration**
+with persistent storage, so no external Home Assistant automation or helper
+has to be installed. Independent user automations/helpers are deliberately
+left alone during updates.
+
+
+
 ## v2026.11.15 — tado X for everyone; household Vaillant features opt-in
 
 **All tado X controls remain available to every tado X user without enabling
@@ -22,16 +55,15 @@ automatically recognised and have the option preserved. Other installations
 need not have myPyllant installed and no Vaillant allocation runs unless this
 single option is enabled.
 
-The default [Heating dashboard example](examples/heating_dashboard.yaml)
-includes universal tado X controls and room schedules only, with no Vaillant
-requirement or particular home's radiator inventory.
+The [canonical Heating dashboard YAML](examples/heating_dashboard.yaml)
+includes universal tado X controls and schedules for all homes, and shows the
+optional Vaillant consumption section only when the integration's read-only
+household energy status sensor reports `on`. The managed `tado X Heating`
+sidebar panel avoids needing this YAML at all.
 
-The optional [Vaillant household dashboard](examples/heating_dashboard_household_vaillant.yaml)
-includes the heating gas-by-room consumption card and EN442 physical radiator
-inventory, and requires the household energy checkbox plus a configured
-myPyllant source. This card remains an optional resource. The included physical
-radiator data is nevertheless present in this public repository; opting out
-hides the runtime feature, not its source.
+The optional consumption card and included hardcoded radiator data remain
+visible in this public source repository; opting out prevents their runtime
+use, not access to the source code.
 
 The built-in dashboard cards have not changed in this release; previous
 registered JavaScript resources still work without cache busting.
