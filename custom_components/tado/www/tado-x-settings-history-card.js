@@ -3,14 +3,13 @@
  * Built-in number/switch/select more-info dialog provides editing controls.
  */
 const XH_SOURCES = [
-  {id:"dhw", title:"Hot-water target", match:"DHW target temperature history", control:"DHW target temperature", unit:"°C"},
-  {id:"maxflow", title:"Maximum heating flow", match:"Maximum flow temperature history", control:"Maximum heating flow temperature", unit:"°C"},
-  {id:"optimised", title:"tado optimised flow limit", match:"Optimised heating flow limit", control:null, unit:"°C"},
-  {id:"adapted", title:"Adaptation enabled time", match:"Flow adaptation enabled percentage", control:"Automatic flow temperature adaptation", unit:"%"}
+ {id:"maxflow",title:"Maximum flow",match:"Maximum flow temperature history",control:"Maximum heating flow temperature",domain:"number",unit:"°C",color:"#0968ae"},
+ {id:"optimised",title:"tado optimised flow",match:"Optimised heating flow limit",control:null,domain:"sensor",unit:"°C",color:"#16a087"},
+ {id:"dhw",title:"Hot-water target",match:"DHW target temperature history",control:"DHW target temperature",domain:"number",unit:"°C",color:"#d5841f"},
+ {id:"adapted",title:"Automatic flow adaptation",match:"Flow adaptation enabled percentage",control:"Automatic flow temperature adaptation",domain:"switch",unit:"%"}
 ];
-const XH_EXTRA = [
-  {title:"DHW mode",match:"DHW operating mode",domain:"select"},
-];
+const XH_OUTDOOR={id:"outdoor",title:"Outside temperature",domain:"sensor",unit:"°C",color:"#8363b9"};
+const XH_EXTRA=[{title:"DHW mode",match:"DHW operating mode",domain:"select"}];
 const XH_PERIODS=[
   {key:"day",label:"24h",days:1,period:"hour"},
   {key:"week",label:"7 days",days:7,period:"hour"},
@@ -23,6 +22,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     super();this.attachShadow({mode:"open"});this._cfg={};
     this._hass=null;this._once=false;this._period="week";
     this._series={};this._busy=false;this._message="";
+    this._hidden=new Set();
   }
   setConfig(cfg){this._cfg=cfg||{};this._render();}
   set hass(hass){
@@ -31,7 +31,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     else if(!this._busy){this._render();}
   }
   getCardSize(){return 9;}
-  static getStubConfig(){return {title:"Hot-water & heating optimisation history"};}
+  static getStubConfig(){return {title:"Flow, hot water and outside temperature history"};}
   _find(name,domain){
     if(!this._hass)return null;
     const candidates=Object.entries(this._hass.states)
@@ -54,8 +54,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     if(this._busy||!this._hass)return;
     this._busy=true;this._render();
     try{
-      const ids=XH_SOURCES.map(x=>this._state(x.match,"sensor")).filter(Boolean);
-      if(!ids.length)throw Error("No tado X setting-history sensors found. Install v2026.11.8 and restart Home Assistant.");
+      const ids=[...new Set([
+        ...XH_SOURCES.map(x=>this._state(x.match,"sensor")).filter(Boolean),
+        this._outdoorId(),
+      ].filter(Boolean))];
+      if(!ids.length)throw Error("No historical temperature sensors found. Update the tado X integration and restart Home Assistant.");
       const range=XH_PERIODS.find(x=>x.key===this._period);
       const end=new Date(),start=new Date(end.getTime()-range.days*86400000);
       const result=await this._hass.callWS({
