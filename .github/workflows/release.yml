@@ -1,4 +1,4 @@
-name: Publish tado X v2026.11.8
+name: Publish tado X v2026.11.9
 
 on:
   workflow_run:
@@ -28,14 +28,14 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(python -c "import json; print(json.load(open('custom_components/tado/manifest.json'))['version'])")
-          if [[ "$VERSION" != "2026.11.8" ]]; then
+          if [[ "$VERSION" != "2026.11.9" ]]; then
             exit 0
           fi
-          if gh release view v2026.11.8 >/dev/null 2>&1; then
+          if gh release view v2026.11.9 >/dev/null 2>&1; then
             echo "Release already exists"
             exit 0
           fi
-          gh release create v2026.11.8 \
+          gh release create v2026.11.9 \
             --target "$VALIDATED_SHA" \
-            --title "tado X v2026.11.8 — schedules, DHW, flow and heating allocation" \
-            --notes-file RELEASE_NOTES_2026.11.8.md
+            --title "tado X v2026.11.9 — schedules, DHW, flow and heating allocation" \
+            --notes-file RELEASE_NOTES_2026.11.9.md
