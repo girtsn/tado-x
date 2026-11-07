@@ -370,7 +370,12 @@ async def allocation_history(
         # Incomplete last month (can be the same month as the first). No
         # double count if it was entirely covered by the first edge.
         final_start = final_month.astimezone(timezone.utc)
-        if end > final_start and end < end_local.astimezone(timezone.utc):
+        final_after = (
+            final_month.replace(year=final_month.year + 1, month=1)
+            if final_month.month == 12 else
+            final_month.replace(month=final_month.month + 1)
+        ).astimezone(timezone.utc)
+        if end > final_start and end < final_after:
             await hourly_between(max(begin, final_start,
                                      next_first_month.astimezone(timezone.utc)
                                      if begin > first_month.astimezone(timezone.utc)
