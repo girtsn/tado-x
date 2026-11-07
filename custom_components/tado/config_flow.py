@@ -30,7 +30,6 @@ from homeassistant.helpers.service_info.zeroconf import (
 from .const import (
     CONF_FALLBACK,
     CONF_REFRESH_TOKEN,
-    CONF_X_ADVANCED,
     CONF_X_HOME_ENERGY,
     CONF_X_LEGACY_ENERGY_PROBE,
     CONST_OVERLAY_TADO_DEFAULT,
@@ -215,10 +214,6 @@ class OptionsFlowHandler(OptionsFlow):
                         CONF_FALLBACK, CONST_OVERLAY_TADO_DEFAULT
                     ),
                 ): vol.In(CONST_OVERLAY_TADO_OPTIONS),
-                vol.Optional(
-                    CONF_X_ADVANCED,
-                    default=self.config_entry.options.get(CONF_X_ADVANCED, False),
-                ): bool,
                 vol.Optional(
                     CONF_X_HOME_ENERGY,
                     default=self.config_entry.options.get(CONF_X_HOME_ENERGY, False),
