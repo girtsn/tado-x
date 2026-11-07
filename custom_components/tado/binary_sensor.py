@@ -28,7 +28,8 @@ from .const import (
     TYPE_POWER,
 )
 from .coordinator import TadoDataUpdateCoordinator
-from .entity import TadoDeviceEntity, TadoZoneEntity
+from .entity import TadoDeviceEntity, TadoZoneEntity, TadoHomeEntity
+from .x_features import energy_enabled
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -201,7 +202,41 @@ async def async_setup_entry(
             ]
         )
 
+    if tado.is_x:
+        # Always publish a read-only state of the one optional integration
+        # feature. Lovelace's section visibility cannot read config entry
+        # options directly; it CAN read this binary sensor. This is not a
+        # configuration switch and never changes the option.
+        entities.append(TadoXVaillantEnergyEnabledBinarySensor(tado, entry))
     async_add_entities(entities, True)
+
+
+class TadoXVaillantEnergyEnabledBinarySensor(TadoHomeEntity, BinarySensorEntity):
+    """Whether optional household Vaillant gas allocation is configured.
+
+    Stable suggested entity ID allows one reusable dashboard YAML for the
+    common single-tado-X-home installation. HA may suffix or override the ID
+    for users with multiple homes or existing entity registry customizations.
+    """
+
+    _attr_name = "tado X Vaillant household energy enabled"
+    _attr_icon = "mdi:chart-areaspline"
+    _attr_entity_category = None
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.home_id}_x_vaillant_energy_enabled"
+        self.entity_id = "binary_sensor.tado_x_vaillant_energy_enabled"
+        self._attr_is_on = energy_enabled(entry)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "feature": "household_vaillant_mypyllant_gas_allocation",
+            "read_only": True,
+            "enabled_from": "tado_integration_options",
+            "general_tado_x_controls_always_enabled": True,
+        }
 
 
 class TadoDeviceBinarySensor(TadoDeviceEntity, BinarySensorEntity):
