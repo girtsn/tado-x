@@ -236,7 +236,14 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   set panel(value){
     const oldId=this._panel?.config?.config_entry;
+    const oldVersion=this._panel?.config?.integration_version;
     this._panel=value;
+    // When the HA frontend delivers a newly registered panel after a restart,
+    // reload once so the new manifest-versioned JS is loaded automatically.
+    if(oldVersion && value?.config?.integration_version &&
+       oldVersion!==value.config.integration_version){
+      window.location.reload();return;
+    }
     if(this._hass && oldId!==value?.config?.config_entry)this._render();
   }
   set narrow(value){this._narrow=Boolean(value);}
