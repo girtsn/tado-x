@@ -1,5 +1,21 @@
 # tado X integration — Home Assistant fork
 
+## v2026.11.10 — all 10 actual tado room names now match automatically
+
+The live `tado.x_radiator_capacity_report` identified four additional exact
+name variants: `1fl bedroom streetside` (tado 7 → physical R06, 2.424 kW),
+`1fl bedroom yardside` (tado 8 → R05, 2.424 kW), `1fl bedroom small`
+(tado 9 → R07, 1.449 kW), and `0fl hallway` (tado 5 → R02, 1.643 kW).
+These are now supported as built-in aliases.
+
+After updating and restarting, the radiator report should show **10 matched
+tado rooms and 25,748 W nominal total**, with the attic bedroom's two
+physical radiators R09 and R10 combined at 6.538 kW. Existing manual
+capacity overrides are preserved unless `tado.x_apply_radiator_capacities`
+is run with `overwrite_existing: true`. This update changes **no tado or
+Vaillant device setting**.
+
+
 ## v2026.11.9 — real radiator inventory, not one kilowatt per thermostat
 
 This update replaces the earlier nominal **1 kW per tado radiator thermostat**
