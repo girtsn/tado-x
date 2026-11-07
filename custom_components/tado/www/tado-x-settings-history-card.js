@@ -477,7 +477,7 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     root.append(card);
   }
 }
-customElements.define("tado-x-settings-history-card",TadoXSettingsHistoryCard);
+if(!customElements.get("tado-x-settings-history-card")) customElements.define("tado-x-settings-history-card",TadoXSettingsHistoryCard);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"tado-x-settings-history-card",
   name:"tado X hot-water and flow history",
