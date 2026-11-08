@@ -42,8 +42,9 @@ assert.equal(picker.range.start,presetRange("week",new Date(),profile("sunday"))
 const scheduleFile=path.resolve(__dirname,"../custom_components/tado/www/tado-x-schedule-card.js");
 const scheduleCode=fs.readFileSync(scheduleFile,"utf8")
   .replaceAll("import.meta.url",JSON.stringify("https://example.test/schedule.js?v=1"));
-vm.runInNewContext(scheduleCode+"\nthis.Schedule=TadoXScheduleCard;",mocks,{filename:scheduleFile});
-const card=new mocks.Schedule();
+const scheduleMocks={...mocks};
+vm.runInNewContext(scheduleCode+"\nthis.Schedule=TadoXScheduleCard;",scheduleMocks,{filename:scheduleFile});
+const card=new scheduleMocks.Schedule();
 card._hass=profile("sunday");
 assert.equal(Array.from(card._displayDays()).join(","),
   "SUNDAY,MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY");
