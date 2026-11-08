@@ -29,6 +29,8 @@ jobs:
         run: node tests/test_frontend_loader.cjs
       - name: Test interactive chart tooltip
         run: node tests/test_chart_hover_tooltip.cjs custom_components/tado/www/x-chart-hover-tooltip.js
+      - name: Test user-localized week selection
+        run: node tests/test_date_range_locale.cjs
       - name: Test categorical presence history
         run: node tests/test_presence_history.cjs
       - name: Validate manifest and JSON translations
