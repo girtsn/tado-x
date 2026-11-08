@@ -11,6 +11,7 @@ const mocks={
     dispatchEvent(){}
     get isConnected(){return false;}
   },
+  CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},
   customElements:{get(){return null;},define(){}},
   navigator:{language:"en-US"},
   window:{customCards:[]},
