@@ -35,7 +35,11 @@ class TadoXPresenceHistoryCard extends HTMLElement {
     if(this.isConnected)this._load();
   }
   set hass(value){
+    const firstLocale=!this._hass && value;
     this._hass=value;
+    if(firstLocale && !this._cfg.shared_date_range && this._range?.preset==="week")
+      this._range=xhPresetRange("week",new Date(),value);
+    if(this._picker?.isConnected)this._picker.hass=value;
     if(!this.isConnected||!value)return;
     const sources=this._sources();
     const ids=sources.filter(s=>s.id).map(s=>s.id).sort().join(",");
@@ -259,6 +263,8 @@ h2{font-size:19px;margin:0 0 4px}
     if(!this._cfg.shared_date_range){
       const picker=this._el("tado-x-date-range-picker-v"+XHP_VERSION.replace(/\./g,"-"));
       picker.range=this._range;
+      picker.hass=this._hass;
+      this._picker=picker;
       picker.addEventListener("date-range-changed",e=>{this.dateRange=e.detail;});
       card.append(picker);
     }
