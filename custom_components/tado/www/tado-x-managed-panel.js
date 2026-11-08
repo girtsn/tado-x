@@ -33,6 +33,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
   }
   set hass(value){
     this._hass=value;
+    if(this._picker?.isConnected)this._picker.hass=value;
     if(!this._assetsReady){
       this._ensureAssets();
       this._render();
@@ -88,7 +89,7 @@ class TadoXManagedHeatingPanel extends HTMLElement {
       xhPresetRange=picker.xhPresetRange;
       if(typeof xhPresetRange!=="function")
         throw new Error("Date picker did not export xhPresetRange");
-      this._dateRange??=xhPresetRange("week");
+      this._dateRange??=xhPresetRange("week",new Date(),this._hass);
       this._assetsReady=true;
     })().catch(err=>{
       this._assetsError="Could not load Heating dashboard modules (version "+
@@ -231,6 +232,8 @@ class TadoXManagedHeatingPanel extends HTMLElement {
     if(this._tab==="overview"){
       const picker=this._element(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
+      picker.hass=this._hass;
+      this._picker=picker;
       picker.addEventListener("date-range-changed",event=>{
         this._dateRange=event.detail;
         for(const card of this._cards){

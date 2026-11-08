@@ -18,8 +18,22 @@ class TadoXScheduleCard extends HTMLElement {
   }
   setConfig(config){this._cfg=config||{};this._render();}
   set hass(hass){
+    const oldStart=this._weekStart();
     this._hass=hass;
     if(!this._initialized && hass){this._initialized=true;this._init();}
+    else if(oldStart!==this._weekStart() && this.isConnected)this._render();
+  }
+  _weekStart(){
+    const weekdays=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+    const selected=weekdays.indexOf(this._hass?.locale?.first_weekday);
+    if(selected>=0)return selected;
+    const lang=this._hass?.locale?.language||this._hass?.language||"en-GB";
+    try{return new Intl.Locale(lang).weekInfo.firstDay%7;}
+    catch(_){return 1;}
+  }
+  _displayDays(){
+    const first=this._weekStart();
+    return Array.from({length:7},(_,i)=>X_DAYS[(first+6+i)%7]);
   }
   getCardSize(){return 7;}
   static getStubConfig(){return {title:"tado X weekly heating schedules"};}
@@ -241,7 +255,7 @@ class TadoXScheduleCard extends HTMLElement {
     }
     if(this._data){
       const tabs=this._node("div",null,"days");
-      for(const d of X_DAYS)tabs.append(this._button(d.slice(0,3)+(this._dirty.has(d)?" *":""),()=>{
+      for(const d of this._displayDays())tabs.append(this._button(d.slice(0,3)+(this._dirty.has(d)?" *":""),()=>{
         this._day=d;this._render();
       },(this._day===d?"active ":"")+(this._dirty.has(d)?"dirty":"")));
       card.append(tabs);
@@ -278,7 +292,7 @@ class TadoXScheduleCard extends HTMLElement {
       cp.append(this._node("strong","Copy schedules"));
       const cprow=this._node("div",null,"row");
       cprow.append(this._node("span","Copy "+this._day+" to"));
-      cprow.append(this._select(X_DAYS.map(d=>[d,d.slice(0,3)]),this._copyTargetDay,v=>{this._copyTargetDay=v;}));
+      cprow.append(this._select(this._displayDays().map(d=>[d,d.slice(0,3)]),this._copyTargetDay,v=>{this._copyTargetDay=v;}));
       cprow.append(this._button("Copy to draft",()=>this._copyDay()));
       cp.append(cprow);
       const dst=this._node("div",null,"row");

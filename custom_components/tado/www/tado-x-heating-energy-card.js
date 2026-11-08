@@ -18,7 +18,11 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     if(this._loaded)this._reload();
   }
   set hass(value){
+    const firstLocale=!this._hass && value;
     this._hass=value;
+    if(firstLocale && !this._cfg.shared_date_range && this._dateRange?.preset==="week")
+      this._dateRange=xhPresetRange("week",new Date(),value);
+    if(this._picker?.isConnected)this._picker.hass=value;
     if(!this._loaded&&value){this._loaded=true;this._reload();}
   }
   getCardSize(){return 6;}
@@ -91,6 +95,8 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     if(!this._cfg.shared_date_range){
       const picker=this._el(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
+      picker.hass=this._hass;
+      this._picker=picker;
       picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
       card.append(picker);
     }

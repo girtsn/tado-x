@@ -32,7 +32,11 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     if(this._once)this._load();
   }
   set hass(hass){
+    const firstLocale=!this._hass && hass;
     this._hass=hass;
+    if(firstLocale && !this._cfg.shared_date_range && this._dateRange?.preset==="week")
+      this._dateRange=xhPresetRange("week",new Date(),hass);
+    if(this._picker?.isConnected)this._picker.hass=hass;
     if(!this._once && hass){this._once=true;this._load();}
     else if(!this._busy){this._render();}
   }
@@ -485,6 +489,8 @@ class TadoXSettingsHistoryCard extends HTMLElement {
     if(!this._cfg.shared_date_range){
       const picker=this._el(xhTag("tado-x-date-range-picker"));
       picker.range=this._dateRange;
+      picker.hass=this._hass;
+      this._picker=picker;
       picker.addEventListener("date-range-changed",event=>{this.dateRange=event.detail;});
       card.append(picker);
     }
