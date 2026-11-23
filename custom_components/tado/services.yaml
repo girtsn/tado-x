@@ -247,6 +247,54 @@ x_compute_heating_allocation:
         config_entry:
           integration: tado
 
+x_scan_vaillant_hourly_quality:
+  name: Find first non-uniform Vaillant heating-gas day
+  description: >-
+    Read-only scan of the original myPyllant hourly heating gas statistics.
+    Detects complete Home Assistant calendar days where every hourly value is
+    almost identical (possible daily total divided evenly into hours).
+    Returns the earliest non-uniform day and a conservative candidate cutoff
+    supported by consecutive non-uniform days. Does not change or delete data.
+  fields:
+    days:
+      required: false
+      default: 120
+      selector:
+        number:
+          min: 3
+          max: 365
+          mode: box
+    tolerance_wh:
+      required: false
+      default: 1
+      description: >-
+        Classify a positive-consumption day as uniform if the difference
+        between its largest and smallest hourly value is no more than this
+        many watt-hours. Default 1 Wh.
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 0.1
+          unit_of_measurement: Wh
+          mode: box
+    confirmation_days:
+      required: false
+      default: 3
+      description: >-
+        Require this many consecutive complete non-uniform days to propose
+        a conservative cutoff (the scan does not apply that cutoff).
+      selector:
+        number:
+          min: 1
+          max: 7
+          mode: box
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
 x_heating_allocation_history:
   name: Read estimated per-room heating gas history
   description: Local Recorder only, returning hourly, daily or monthly summaries for dashboards.
