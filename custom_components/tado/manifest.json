@@ -1,6 +1,6 @@
 {
   "domain": "tado",
-  "version": "2026.11.28",
+  "version": "2026.11.29",
   "name": "Tado",
   "codeowners": [
     "@erwindouna"

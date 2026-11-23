@@ -103,120 +103,221 @@ def _meta(main, zone_id: str, name: str):
     )
 
 
-async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -> dict:
-    """Append only completed hours; never rewrite existing recorder rows.
+def _calculate_hourly_shares(
+    gas_kwh: float, means: dict[str, float | None],
+    capacities: dict[str, float],
+) -> tuple[dict[str, float], float]:
+    """Single allocation formula used for both live history and persisted v2."""
+    if any(value is None or not 0 <= value <= 100 for value in means.values()):
+        return {zid: 0.0 for zid in means}, gas_kwh
+    weights = {zid: float(value) * capacities[zid] for zid, value in means.items()}
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return {zid: 0.0 for zid in means}, gas_kwh
+    return {
+        zid: gas_kwh * weight / total_weight for zid, weight in weights.items()
+    }, 0.0
 
-    The first publish attempt should cover periods during which both source
-    myPyllant statistics and tado heating activity statistics are available.
+
+async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -> dict:
+    """Reconcile archived v2 hourly rows against CURRENT Vaillant gas statistics.
+
+    Home Assistant's supported external-statistics importer performs an upsert:
+    existing hourly records are updated. Recalculate state AND cumulative sum,
+    including all following hours within the rebuilt window, so late Vaillant
+    corrections never leave past gas shares or cumulative totals inconsistent.
+
+    Never read or write a different household or the original Vaillant series.
+    If a historical source hour is absent, refuse any rewrite that might shift
+    the cumulative sums across that gap. A missing UNPUBLISHED trailing hour
+    is safe: defer it until the next scheduled run.
     """
     if not 1 <= days <= MAX_BACKFILL_DAYS:
-        raise HomeAssistantError("Backfill days must be between 1 and 35")
+        raise HomeAssistantError("Reconciliation days must be between 1 and 35")
     if not getattr(main, "is_x", False):
         raise HomeAssistantError("Heating allocation requires tado X")
     source_id = _gas_statistic(hass)
     if source_id is None:
-        return {"status": "no_unique_vaillant_gas_heating_statistic",
-                "message": "Requires a running myPyllant hourly Gas Heating profile."}
+        return {
+            "status": "no_unique_vaillant_gas_heating_statistic",
+            "no_statistics_modified": True,
+        }
     room_sensors = _room_sensor_ids(hass, main)
     if len(room_sensors) != len(main.zones):
-        return {"status": "room_heating_sensors_not_ready",
-                "rooms_found": len(room_sensors), "rooms_expected": len(main.zones)}
-
-    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=days)
+        return {
+            "status": "room_heating_sensors_not_ready",
+            "rooms_found": len(room_sensors), "rooms_expected": len(main.zones),
+            "no_statistics_modified": True,
+        }
     try:
         cap = _capacities(main)
     except HomeAssistantError as err:
-        report = radiator_capacity_report(main.zones, main.config_entry.options.get("x_capacity_kw", {}),
-        main.config_entry.options.get("x_radiator_room_mapping", {}))
+        report = radiator_capacity_report(
+            main.zones, main.config_entry.options.get("x_capacity_kw", {}),
+            main.config_entry.options.get("x_radiator_room_mapping", {}),
+        )
         return {
             "status": "radiator_capacity_mapping_needs_review",
-            "message": str(err),
-            "rooms": report["rooms"],
+            "message": str(err), "rooms": report["rooms"],
             "no_statistics_modified": True,
         }
-    stat_ids = set(room_sensors.values()) | {source_id}
-    output_ids = {_stat_id(main, zid) for zid in room_sensors}
-    output_ids.add(_stat_id(main, "unallocated"))
-    snapshots = await _fetch(hass, start - timedelta(hours=1), end,
-                             stat_ids | output_ids)
+
+    end = datetime.now(timezone.utc).replace(
+        minute=0, second=0, microsecond=0
+    )
+    requested_start = end - timedelta(days=days)
+    zone_ids = (*room_sensors, "unallocated")
+    out_ids = {_stat_id(main, zid) for zid in zone_ids}
+    snapshots = await _fetch(
+        hass, requested_start - timedelta(hours=1), end,
+        {source_id, *room_sensors.values(), *out_ids},
+    )
     source = _rows_by_start(snapshots.get(source_id))
-    rooms = {zid: _rows_by_start(snapshots.get(entity_id))
-             for zid, entity_id in room_sensors.items()}
-    outputs = {zid: _rows_by_start(snapshots.get(_stat_id(main, zid)))
-               for zid in (*room_sensors, "unallocated")}
-    hours = [start + timedelta(hours=i)
-             for i in range(int((end-start).total_seconds()//3600))]
-    new: dict[str, list] = {key: [] for key in outputs}
-    allocated_kwh, unknown_kwh, total_kwh = 0.0, 0.0, 0.0
-    processed = 0
-    for hour_start in hours:
-        t = hour_start.timestamp()
-        old_t = (hour_start - timedelta(hours=1)).timestamp()
-        gas = source.get(t)
-        gas_prev = source.get(old_t)
-        if not gas or not gas_prev:
-            continue
-        if gas.get("sum") is None or gas_prev.get("sum") is None:
-            continue
-        delta_wh = float(gas["sum"]) - float(gas_prev["sum"])
-        if not 0 <= delta_wh <= 200000:
-            # Counter reset or unexpected input; never invent gas quantities.
-            continue
-        gas_kwh = delta_wh * KWH_PER_WH
-        means = {zid: room[t]["mean"] if t in room and room[t].get("mean") is not None else None
-                 for zid, room in rooms.items()}
-        if any(v is None or not 0 <= v <= 100 for v in means.values()):
-            shares = {zid: 0.0 for zid in room_sensors}
-            unknown = gas_kwh
-        else:
-            weights = {zid: float(v)*cap[zid] for zid, v in means.items()}
-            total_w = sum(weights.values())
-            shares = {zid: gas_kwh*value/total_w if total_w>0 else 0.0
-                      for zid, value in weights.items()}
-            unknown = gas_kwh if total_w == 0 else 0.0
-
-        totals = {**shares, "unallocated": unknown}
-        # Recorder sum should remain monotone. Never insert an older record
-        # before a newer published row: it would require a rebasing rewrite.
-        if any(any(s > t for s in outputs[zid]) for zid in outputs):
-            continue
-        if all(t in outputs[zid] for zid in outputs):
-            continue
-
-        for zid, value in totals.items():
-            if t in outputs[zid]:
-                continue
-            prior = [r for start_time, r in outputs[zid].items()
-                     if start_time < t and r.get("sum") is not None]
-            prior_sum = float(prior[-1]["sum"]) if prior else 0.0
-            # Also account for earlier NEW rows from this call.
-            if new[zid]:
-                prior_sum = new[zid][-1]["sum"]
-            row = StatisticData(start=hour_start, state=value, sum=prior_sum+value)
-            new[zid].append(row)
-        processed += 1
-        total_kwh += gas_kwh
-        allocated_kwh += gas_kwh-unknown
-        unknown_kwh += unknown
-
-    if not dry_run:
-        names = {str(z["id"]): z.get("name",str(z["id"])) for z in main.zones}
-        names["unallocated"] = "Unallocated / no room demand"
-        for zid, rows in new.items():
-            if rows:
-                async_add_external_statistics(hass, _meta(main, zid, names[zid]), rows)
-    return {
-        "status": "estimated_hours_published" if not dry_run else "dry_run",
-        "hours": processed, "gas_heating_kwh": round(total_kwh,3),
-        "allocated_kwh": round(allocated_kwh,3),
-        "unallocated_kwh": round(unknown_kwh,3),
-        "source": "myPyllant Gas Heating (Wh) + tado heating demand hourly means",
-        "capacity_basis": "EN442 75/65/20 radiator output, room sum for multiple radiators",
-        "capacity_kw": cap,
-        "interpretation": "Estimated allocation of gas INPUT, not thermal energy per radiator",
+    rooms = {
+        zid: _rows_by_start(snapshots.get(entity_id))
+        for zid, entity_id in room_sensors.items()
+    }
+    outputs = {
+        zid: _rows_by_start(snapshots.get(_stat_id(main, zid)))
+        for zid in zone_ids
     }
 
+    # The feature was introduced recently. Do not invent heating allocations
+    # preceding the earliest already published v2 statistic within the window.
+    published = sorted({
+        stamp for series in outputs.values()
+        for stamp in series
+        if requested_start.timestamp() <= stamp < end.timestamp()
+    })
+    valid_source = sorted(
+        stamp for stamp, row in source.items()
+        if stamp >= requested_start.timestamp()
+        and stamp < end.timestamp()
+        and source.get(stamp - 3600) is not None
+        and row.get("sum") is not None
+        and source[stamp - 3600].get("sum") is not None
+    )
+    if not valid_source:
+        return {"status": "no_valid_source_hours",
+                "hours": 0, "no_statistics_modified": True}
+    start_ts = max(
+        requested_start.timestamp(),
+        published[0] if published else valid_source[0],
+    )
+    start = _hour(start_ts)
+    if start >= end:
+        return {"status": "no_hours_to_reconcile", "hours": 0,
+                "no_statistics_modified": True}
+
+    # Read a prior baseline independent of the latest stored cumulative sum:
+    # the latter already contains the hours we are about to recalculate.
+    previous = await _fetch(
+        hass, start - timedelta(days=35), start, out_ids
+    )
+    baseline = {}
+    for zid in zone_ids:
+        older = [
+            r for r in previous.get(_stat_id(main, zid), [])
+            if r.get("sum") is not None and float(r["start"]) < start_ts
+        ]
+        baseline[zid] = float(max(older, key=lambda r: r["start"])["sum"]) \
+            if older else 0.0
+    running = baseline.copy()
+    pending: dict[str, list[StatisticData]] = {zid: [] for zid in zone_ids}
+    changed_hours: set[float] = set()
+    missing_hours: list[str] = []
+    gas_total = unknown_total = 0.0
+    first_missing: float | None = None
+    calculated = 0
+
+    for offset in range(int((end - start).total_seconds() // 3600)):
+        at = start + timedelta(hours=offset)
+        stamp = at.timestamp()
+        prior = stamp - 3600
+        current, prev = source.get(stamp), source.get(prior)
+        if current is None or prev is None or (
+            current.get("sum") is None or prev.get("sum") is None
+        ):
+            first_missing = stamp
+        else:
+            delta_wh = float(current["sum"]) - float(prev["sum"])
+            if not 0 <= delta_wh <= 200000:
+                first_missing = stamp
+        if first_missing is not None:
+            missing_hours.append(at.isoformat())
+            break
+
+        gas_kwh = delta_wh * KWH_PER_WH
+        means = {
+            zid: (data[stamp].get("mean") if stamp in data else None)
+            for zid, data in rooms.items()
+        }
+        shares, unknown = _calculate_hourly_shares(gas_kwh, means, cap)
+        values = {**shares, "unallocated": unknown}
+        calculated += 1
+        gas_total += gas_kwh
+        unknown_total += unknown
+        for zid in zone_ids:
+            value = values[zid]
+            running[zid] += value
+            old = outputs[zid].get(stamp)
+            differs = (
+                old is None or old.get("sum") is None
+                or abs(float(old["sum"]) - running[zid]) > 0.000001
+                or old.get("state") is None
+                or abs(float(old["state"]) - value) > 0.000001
+            )
+            if differs:
+                pending[zid].append(StatisticData(
+                    start=at, state=value, sum=running[zid],
+                ))
+                changed_hours.add(stamp)
+
+    # A missing source hour before an already-published later v2 row would
+    # invalidate the cumulative baseline of those later records. Do not write
+    # any corrections until the missing Vaillant source hour reappears.
+    if first_missing is not None and any(
+        stamp >= first_missing for data in outputs.values() for stamp in data
+    ):
+        return {
+            "status": "blocked_missing_published_source_hour",
+            "hours": calculated,
+            "first_missing_utc": _hour(first_missing).isoformat(),
+            "no_statistics_modified": True,
+            "message": "Cannot safely rebase existing cumulative v2 rows across "
+                       "a missing Vaillant source hour.",
+        }
+
+    changed_rows = sum(len(rows) for rows in pending.values())
+    if not dry_run:
+        names = {str(z["id"]): str(z.get("name", z["id"])) for z in main.zones}
+        names["unallocated"] = "Unallocated / no room demand"
+        for zid, rows in pending.items():
+            if rows:
+                async_add_external_statistics(
+                    hass, _meta(main, zid, names[zid]), rows
+                )
+    return {
+        "status": (
+            "dry_run" if dry_run else
+            "reconciled_hours_queued" if changed_rows else "already_reconciled"
+        ),
+        "hours": calculated,
+        "start_time": start.isoformat(),
+        "end_time": (start + timedelta(hours=calculated)).isoformat(),
+        "first_missing_utc": missing_hours[0] if missing_hours else None,
+        "changed_hours": len(changed_hours),
+        "changed_statistic_rows": changed_rows,
+        "gas_heating_kwh": round(gas_total, 3),
+        "allocated_kwh": round(gas_total - unknown_total, 3),
+        "unallocated_kwh": round(unknown_total, 3),
+        "no_statistics_modified": dry_run or changed_rows == 0,
+        "source": "Current myPyllant hourly Gas Heating + tado room demand",
+        "capacity_basis": "EN442 75/65/20 radiator output",
+        "interpretation": "Derived gas input shares, not delivered radiator heat",
+        "note": "Uses supported Recorder external-statistics upsert; "
+                "existing v2 IDs stay stable and Vaillant input is unchanged.",
+    }
 
 
 async def _live_reconciled_history(
@@ -293,20 +394,9 @@ async def _live_reconciled_history(
                 measurements[zid] = float(raw) if raw is not None else None
             except (ValueError, TypeError):
                 measurements[zid] = None
-        if any(v is None or not 0 <= v <= 100 for v in measurements.values()):
-            values = {zid: 0.0 for zid in room_sensors}
-            unknown = gas_kwh
-        else:
-            weights = {
-                zid: float(value) * capacities[zid]
-                for zid, value in measurements.items()
-            }
-            weight_total = sum(weights.values())
-            values = {
-                zid: gas_kwh * weight / weight_total if weight_total > 0 else 0.0
-                for zid, weight in weights.items()
-            }
-            unknown = gas_kwh if weight_total == 0 else 0.0
+        values, unknown = _calculate_hourly_shares(
+            gas_kwh, measurements, capacities
+        )
         unknown_total += unknown
         values["unallocated"] = unknown
 

@@ -235,6 +235,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
 
     if coordinator.is_x and energy_enabled(entry):
         coordinator.x_allocation_lock = asyncio.Lock()
+        # Recheck the whole recent v2 archive once after each restart; keep
+        # the normal hourly refresh limited to the preceding three days.
+        coordinator.x_allocation_full_rebuild_pending = True
 
         @callback
         def run_hourly_allocation(now) -> None:
@@ -244,7 +247,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
             async def run():
                 async with coordinator.x_allocation_lock:
                     try:
-                        await allocate_recent(hass, coordinator, days=3)
+                        days = (
+                            35 if coordinator.x_allocation_full_rebuild_pending
+                            else 3
+                        )
+                        result = await allocate_recent(
+                            hass, coordinator, days=days
+                        )
+                        if result["status"] in (
+                            "reconciled_hours_queued", "already_reconciled"
+                        ):
+                            coordinator.x_allocation_full_rebuild_pending = False
                     except Exception:
                         _LOGGER.warning(
                             "tado X / Vaillant optional heating estimate failed",

@@ -220,8 +220,13 @@ x_set_flow:
           integration: tado
 
 x_compute_heating_allocation:
-  name: Compute estimated gas input allocated to tado rooms
-  description: Local Recorder only. Uses myPyllant Gas Heating hourly Wh and tado room mean heating demand. Publishes separate tado external kWh statistics; does NOT alter source statistics.
+  name: Reconcile and repair historic tado room heating-gas allocation
+  description: >-
+    Recalculates existing v2 room statistics using current myPyllant hourly
+    Gas Heating and tado demand. Updates past tado-only hourly state and
+    cumulative sum through the supported Recorder importer. No Vaillant data
+    is changed. First run with dry_run=true to inspect changes. A missing
+    historical source hour blocks unsafe partial updates.
   fields:
     days:
       required: false
