@@ -292,5 +292,150 @@ class AllocationTests(unittest.TestCase):
 
 
 
+    def test_rebuild_corrects_all_old_hours_and_cumulative_sums(self):
+        """Late Vaillant revisions must upsert old v2 rows and rebase successors."""
+        older = (self.end - timedelta(hours=3)).timestamp()
+        raw = {
+            "mypyllant:heating": [
+                {"start": older, "sum": 1000},
+                {"start": self.t0, "sum": 3000},
+                {"start": self.t1, "sum": 5000},
+            ],
+            "sensor.r1": [
+                {"start": self.t0, "mean": 25},
+                {"start": self.t1, "mean": 50},
+            ],
+            "sensor.r2": [
+                {"start": self.t0, "mean": 75},
+                {"start": self.t1, "mean": 50},
+            ],
+        }
+        # Older v2 inputs were too small, but both old timestamps exist.
+        for zid, amounts in (("101", [(0.25, 0.25), (0.25, 0.5)]),
+                             ("102", [(0.75, 0.75), (0.75, 1.5)]),
+                             ("unallocated", [(0, 0), (0, 0)])):
+            raw[allocation._stat_id(self.main, zid)] = [
+                {"start": stamp, "state": st, "sum": total}
+                for stamp, (st, total) in zip((self.t0, self.t1), amounts)
+            ]
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101": 1.0, "102": 1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "async_add_external_statistics",
+                         lambda hass, meta, rows: self.writes.append((meta, rows))),
+        ):
+            preview = asyncio.run(allocation.allocate_recent(
+                self.hass, self.main, days=1, dry_run=True
+            ))
+            self.assertEqual(preview["status"], "dry_run")
+            self.assertEqual(preview["changed_hours"], 2)
+            self.assertEqual(preview["changed_statistic_rows"], 4)
+            self.assertFalse(self.writes)
+            result = asyncio.run(allocation.allocate_recent(
+                self.hass, self.main, days=1, dry_run=False
+            ))
+        self.assertEqual(result["status"], "reconciled_hours_queued")
+        self.assertEqual(result["gas_heating_kwh"], 4)
+        self.assertEqual(result["changed_hours"], 2)
+        corrections = {meta["statistic_id"]: rows for meta, rows in self.writes}
+        bedroom = corrections[allocation._stat_id(self.main, "101")]
+        bath = corrections[allocation._stat_id(self.main, "102")]
+        self.assertEqual(len(bedroom), 2)
+        self.assertAlmostEqual(bedroom[0]["state"], 0.5)
+        self.assertAlmostEqual(bedroom[0]["sum"], 0.5)
+        self.assertAlmostEqual(bedroom[1]["state"], 1.0)
+        self.assertAlmostEqual(bedroom[1]["sum"], 1.5)
+        self.assertAlmostEqual(bath[0]["sum"], 1.5)
+        self.assertAlmostEqual(bath[1]["sum"], 2.5)
+
+    def test_rebuild_refuses_to_break_cumulative_sums_across_missing_hour(self):
+        """No partial rewrite when a later archived hour exists beyond source gap."""
+        older = (self.end - timedelta(hours=3)).timestamp()
+        raw = {
+            "mypyllant:heating": [
+                {"start": older, "sum": 1000},
+                {"start": self.t0, "sum": 3000},
+                # t1 is currently unavailable
+            ],
+            "sensor.r1": [{"start": self.t0, "mean": 50}],
+            "sensor.r2": [{"start": self.t0, "mean": 50}],
+        }
+        for zid in ("101", "102", "unallocated"):
+            raw[allocation._stat_id(self.main, zid)] = [
+                {"start": self.t0, "state": 0.1, "sum": 0.1},
+                {"start": self.t1, "state": 0.1, "sum": 0.2},
+            ]
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101": 1.0, "102": 1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "async_add_external_statistics",
+                         side_effect=AssertionError("must not write partial history")),
+        ):
+            result = asyncio.run(allocation.allocate_recent(
+                self.hass, self.main, days=1, dry_run=False
+            ))
+        self.assertEqual(result["status"], "blocked_missing_published_source_hour")
+        self.assertTrue(result["no_statistics_modified"])
+
+    def test_rebuild_unchanged_rows_are_not_reimported(self):
+        older = (self.end - timedelta(hours=3)).timestamp()
+        raw = {
+            "mypyllant:heating": [
+                {"start": older, "sum": 1000},
+                {"start": self.t0, "sum": 3000},
+                {"start": self.t1, "sum": 5000},
+            ],
+            "sensor.r1": [
+                {"start": self.t0, "mean": 25},
+                {"start": self.t1, "mean": 50},
+            ],
+            "sensor.r2": [
+                {"start": self.t0, "mean": 75},
+                {"start": self.t1, "mean": 50},
+            ],
+            allocation._stat_id(self.main, "101"): [
+                {"start": self.t0, "state": 0.5, "sum": 0.5},
+                {"start": self.t1, "state": 1.0, "sum": 1.5},
+            ],
+            allocation._stat_id(self.main, "102"): [
+                {"start": self.t0, "state": 1.5, "sum": 1.5},
+                {"start": self.t1, "state": 1.0, "sum": 2.5},
+            ],
+            allocation._stat_id(self.main, "unallocated"): [
+                {"start": self.t0, "state": 0, "sum": 0},
+                {"start": self.t1, "state": 0, "sum": 0},
+            ],
+        }
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101": 1.0, "102": 1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "async_add_external_statistics",
+                         side_effect=AssertionError("already correct")),
+        ):
+            result = asyncio.run(allocation.allocate_recent(
+                self.hass, self.main, days=1, dry_run=False
+            ))
+        self.assertEqual(result["status"], "already_reconciled")
+        self.assertEqual(result["changed_statistic_rows"], 0)
+
+
 if __name__=="__main__":
     unittest.main()
