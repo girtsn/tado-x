@@ -960,6 +960,7 @@ async def reconciliation_report(
 async def allocation_history(
     hass, main, period: str = "month", *,
     start_time: str | None = None, end_time: str | None = None,
+    time_zone: str | None = None,
 ) -> dict:
     """Read exact calendar ranges from Recorder; never modify source statistics.
 
@@ -970,7 +971,14 @@ async def allocation_history(
     if period not in ("day", "week", "month", "year", "3years"):
         raise HomeAssistantError("Invalid history period")
     now = datetime.now(timezone.utc)
-    tz = ZoneInfo(hass.config.time_zone or "UTC")
+    # Browser-side pickers send explicit UTC instants, but day/month
+    # grouping must also use the viewing user's selected timezone.
+    # Caller-provided timezone affects display only, never Recorder data
+    # or the fixed physical-home gas-allocation cutoff.
+    try:
+        tz = ZoneInfo(time_zone or hass.config.time_zone or "UTC")
+    except (ValueError, KeyError) as err:
+        raise HomeAssistantError("Invalid history display time_zone") from err
     if (start_time is None) != (end_time is None):
         raise HomeAssistantError("start_time and end_time must be supplied together")
     if start_time is not None:
