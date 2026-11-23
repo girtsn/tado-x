@@ -102,7 +102,7 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     }
     const actions=this._el("div",null,"actions");
     actions.append(this._button("Refresh",()=>this._reload()));
-    actions.append(this._button("Update estimates",()=>this._compute()));
+    // Current Vaillant history is re-evaluated on every Refresh; no DB rewrite.
     card.append(actions);
     if(this._data?.series?.length){
       const map=new Map(this._data.rooms.map(name=>[name,0]));
@@ -121,6 +121,30 @@ class TadoXHeatingEnergyCard extends HTMLElement {
       a.append(this._el("strong",this._fmt(allocated)+" kWh"));metric.append(a);
       const b=this._el("div");b.append(this._el("span","Unallocated","muted"));
       b.append(this._el("strong",this._fmt(unallocated)+" kWh"));metric.append(b);card.append(metric);
+      if(this._data?.data_mode==="live_reconciled"){
+        const source=Number(this._data.vaillant_heating_kwh)||0;
+        const legacy=Number(this._data.legacy_stored_kwh)||0;
+        const gap=Number(this._data.legacy_difference_kwh)||0;
+        const comparison=this._el("div",null,"metric");
+        const vaillant=this._el("div");
+        vaillant.append(this._el("span","Current Vaillant heating input","muted"));
+        vaillant.append(this._el("strong",this._fmt(source)+" kWh"));
+        comparison.append(vaillant);
+        const archived=this._el("div");
+        archived.append(this._el("span","Archived v2 discrepancy","muted"));
+        archived.append(this._el("strong",this._fmt(gap)+" kWh"));
+        comparison.append(archived);
+        card.append(comparison);
+        const incomplete=Number(this._data.missing_source_hours)||0;
+        const notice=this._el("p",incomplete
+          ?incomplete+" source hours are currently missing. Totals are incomplete."
+          :Math.abs(gap)>0.05
+            ?"Recomputed from current Vaillant data. The old stored room allocations total "+
+              this._fmt(legacy)+" kWh; those statistics have not been rewritten."
+            :"Reconciled against current Vaillant hourly input; old statistics unchanged.",
+          "notice");
+        card.append(notice);
+      }
       const max=Math.max(...ordered.map(x=>x[1]),1);
       for(const [name,value] of ordered){
         const row=this._el("div",null,"room"+(name==="Unallocated"?" unallocated":""));
