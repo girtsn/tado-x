@@ -379,7 +379,7 @@ def setup_services(
                     vol.Coerce(int), vol.Range(min=1, max=7)
                 ),
             }),
-            supports_response=SupportsResponse.ONLY,
+            supports_response=SupportsResponse.OPTIONAL,
         )
 
         async def x_diagnose_unallocated(call: ServiceCall) -> dict:
