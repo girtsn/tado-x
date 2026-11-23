@@ -437,5 +437,165 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(result["changed_statistic_rows"], 0)
 
 
+    def test_hourly_quality_scan_finds_first_realistic_day_without_writing(self):
+        """Flat historical days lead to a complete, sustained varied run."""
+        from datetime import date, time
+        from zoneinfo import ZoneInfo
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
+                return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
+        tz = ZoneInfo("Europe/Brussels")
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        first = date(2026, 11, 3)
+        end = date(2026, 11, 10)
+        def utc_midnight(d):
+            return datetime.combine(d, time.min, tzinfo=tz).astimezone(timezone.utc)
+        hour = utc_midnight(first) - timedelta(hours=1)
+        end_hour = utc_midnight(end)
+        values = []
+        running = 0.0
+        while hour < end_hour:
+            local = hour.astimezone(tz)
+            day_index = (local.date() - first).days
+            # November 3-6 are flat-positive; Nov 7-9 have real hourly variety.
+            amount = 100 if day_index < 4 else (60 + local.hour * 5)
+            running += amount
+            values.append({"start": hour.timestamp(), "sum": running})
+            hour += timedelta(hours=1)
+
+        async def fetch(*args, **kwargs):
+            return {"vaillant:hourly": values}
+
+        with (
+            patch.object(allocation, "datetime", FrozenDateTime),
+            patch.object(allocation, "_gas_statistic", return_value="vaillant:hourly"),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(
+                allocation, "async_add_external_statistics",
+                side_effect=AssertionError("Scan must be read-only")
+            ),
+        ):
+            result = asyncio.run(allocation.detect_vaillant_hourly_start(
+                self.hass, days=7, confirmation_days=3,
+                tolerance_wh=1.0
+            ))
+        self.assertEqual(result["status"], "hourly_uniformity_scan_completed")
+        self.assertTrue(result["read_only"])
+        self.assertTrue(result["no_statistics_modified"])
+        self.assertEqual(result["first_complete_nonuniform_day"], "2026-11-07")
+        self.assertEqual(result["first_consecutive_nonuniform_day"], "2026-11-07")
+        self.assertEqual(result["last_uniform_positive_day"], "2026-11-06")
+        self.assertEqual(result["candidate_cutoff_day"], "2026-11-07")
+        self.assertFalse(result["candidate_is_proven_measured_hourly"])
+        self.assertEqual(
+            result["classification_counts"]["uniform_positive_suspected_backfill"], 4
+        )
+        self.assertEqual(result["classification_counts"]["nonuniform"], 3)
+        self.assertEqual(len(result["transition_window"]), 7)
+
+    def test_hourly_quality_scan_handles_dst_and_missing_hours(self):
+        """DST fall-back day requires 25 genuine hourly samples, not 24."""
+        from datetime import date, time
+        from zoneinfo import ZoneInfo
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+                return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
+        tz = ZoneInfo("Europe/Brussels")
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        first = date(2026, 10, 19)
+        end = date(2026, 10, 29)
+        def midnight(d):
+            return datetime.combine(d, time.min, tzinfo=tz).astimezone(timezone.utc)
+        hour = midnight(first) - timedelta(hours=1)
+        end_hour = midnight(end)
+        running = 0.0
+        rows = []
+        while hour < end_hour:
+            local = hour.astimezone(tz)
+            day_index = (local.date() - first).days
+            # All positive flat up to 24th. Oct 25 (25h) and thereafter varied.
+            amount = 100 if day_index < 6 else (55 + int(hour.timestamp()/3600)%24*4)
+            running += amount
+            rows.append({"start": hour.timestamp(), "sum": running})
+            hour += timedelta(hours=1)
+        # Missing one source hour on the last complete day cannot look reliable.
+        missing_stamp = (midnight(date(2026, 10, 28))
+                         + timedelta(hours=14)).timestamp()
+        rows = [r for r in rows if r["start"] != missing_stamp]
+        async def fetch(*args, **kwargs):
+            return {"vaillant:hourly": rows}
+
+        with (
+            patch.object(allocation, "datetime", FrozenDateTime),
+            patch.object(allocation, "_gas_statistic", return_value="vaillant:hourly"),
+            patch.object(allocation, "_fetch", fetch),
+        ):
+            result = asyncio.run(allocation.detect_vaillant_hourly_start(
+                self.hass, days=10, confirmation_days=3
+            ))
+        self.assertEqual(result["candidate_cutoff_day"], "2026-10-25")
+        self.assertEqual(result["first_complete_nonuniform_day"], "2026-10-25")
+        self.assertEqual(result["classification_counts"]["incomplete"], 1)
+        autumn = next(
+            row for row in result["transition_window"]
+            if row["date"] == "2026-10-25"
+        )
+        self.assertEqual(autumn["expected_hours"], 25)
+        self.assertEqual(autumn["valid_hours"], 25)
+        self.assertEqual(autumn["classification"], "nonuniform")
+
+    def test_hourly_quality_scan_distinguishes_zero_from_uniform_positive(self):
+        from datetime import date, time
+        from zoneinfo import ZoneInfo
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
+                return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
+        tz = ZoneInfo("Europe/Brussels")
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        day0 = date(2026, 11, 7)
+        def midnight(d):
+            return datetime.combine(d, time.min, tzinfo=tz).astimezone(timezone.utc)
+        hour = midnight(day0)-timedelta(hours=1)
+        end = midnight(date(2026, 11, 10))
+        total = 0.
+        rows = []
+        while hour < end:
+            # First day no gas, second uniform, third varied.
+            d = hour.astimezone(tz).date()
+            amount = (0 if d <= day0 else
+                      300 if d == date(2026, 11, 8) else
+                      100 + hour.astimezone(tz).hour*10)
+            total += amount
+            rows.append({"start": hour.timestamp(), "sum": total})
+            hour += timedelta(hours=1)
+        async def fetch(*args, **kwargs):
+            return {"vaillant:hourly": rows}
+
+        with (
+            patch.object(allocation, "datetime", FrozenDateTime),
+            patch.object(allocation, "_gas_statistic", return_value="vaillant:hourly"),
+            patch.object(allocation, "_fetch", fetch),
+        ):
+            report = asyncio.run(allocation.detect_vaillant_hourly_start(
+                self.hass, days=3, confirmation_days=2
+            ))
+        self.assertEqual(report["classification_counts"]["no_heating"], 1)
+        self.assertEqual(report["classification_counts"]["uniform_positive_suspected_backfill"], 1)
+        self.assertEqual(report["first_complete_nonuniform_day"], "2026-11-09")
+        self.assertIsNone(report["candidate_cutoff_day"])
+
+
 if __name__=="__main__":
     unittest.main()
