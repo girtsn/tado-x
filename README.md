@@ -549,11 +549,20 @@ Estimated results are published as **separate** `tado:` external hourly
 statistics, preserving original Vaillant recorder statistics exactly.
 This job runs at **HH:15** using local Recorder only; it makes
 **zero additional tado or Vaillant cloud API requests**. Existing historical
-statistics for allocation are append-only; they do not retroactively
-recalculate when changing weights. Initial allocation can only cover hours
-that have the required historic source statistics. The optional manual
-`tado.x_compute_heating_allocation` action can process the previous 1–35 days,
-with a `dry_run` option.
+v2 allocation statistics are reconciled against current Vaillant hourly
+values, including any delayed revisions. Home Assistant's supported external
+statistics upsert updates already-published `tado:` hourly rows and rebases
+their cumulative sums; original `mypyllant:` data is never modified. The
+hourly scheduler checks the latest three days, and checks up to 35 days once
+after an integration restart. If a required source hour is missing while
+later v2 rows exist, reconciliation stops without partial writes.
+
+For an explicit full-history check, call `tado.x_compute_heating_allocation`
+with `days: 35` and `dry_run: true`. Review the number of changed hours,
+then repeat with `dry_run: false` to queue the corrections. This reuses the
+existing statistic IDs; no duplicate v3 series are created. The current
+recalculation window is capped at 35 days, but previously corrected older
+hours remain valid in long-range dashboards.
 
 For the dashboard add another **JavaScript module** resource:
 
