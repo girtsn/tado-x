@@ -12,6 +12,7 @@ from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
 from .heat_allocation import (
     allocate_recent, allocation_history, diagnose_unallocated,
     reconciliation_report, detect_vaillant_hourly_start,
+    configure_heating_allocation_cutoff,
 )
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 from .room_override import room_override_report, observed_home_mode
@@ -322,6 +323,31 @@ def setup_services(
             schema=vol.Schema({
                 **home,
                 vol.Optional("date"): str,
+            }),
+            supports_response=SupportsResponse.ONLY,
+        )
+
+        async def x_apply_heating_allocation_cutoff(call: ServiceCall) -> dict:
+            """Preview or perform ONLY the household's derived-v2 cleanup."""
+            main = get_x_coordinator(call, energy=True)
+            async with main.x_allocation_lock:
+                return await configure_heating_allocation_cutoff(
+                    hass, main,
+                    date=call.data["date"],
+                    dry_run=call.data.get("dry_run", True),
+                    confirm_delete_pre_cutoff=call.data.get(
+                        "confirm_delete_pre_cutoff", False
+                    ),
+                )
+
+        hass.services.async_register(
+            DOMAIN, "x_apply_heating_allocation_cutoff",
+            x_apply_heating_allocation_cutoff,
+            schema=vol.Schema({
+                **home,
+                vol.Required("date"): str,
+                vol.Optional("dry_run", default=True): bool,
+                vol.Optional("confirm_delete_pre_cutoff", default=False): bool,
             }),
             supports_response=SupportsResponse.ONLY,
         )

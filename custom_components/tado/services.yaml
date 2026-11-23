@@ -247,6 +247,45 @@ x_compute_heating_allocation:
         config_entry:
           integration: tado
 
+x_apply_heating_allocation_cutoff:
+  name: Apply confirmed Tado heating-gas allocation cutoff
+  description: >-
+    Preview or apply a per-household, Home Assistant-local calendar cutoff.
+    With explicit confirmation, deletes ONLY pre-cutoff tado v2 room gas
+    distributions (10 rooms plus Unallocated) and rebuilds every retained
+    hourly tado v2 state and cumulative sum from current Vaillant hourly
+    source data, using Home Assistant's supported Recorder APIs.
+    Preserves ALL Vaillant and tado heating-demand statistics.
+    Create a Home Assistant backup before executing with dry_run=false.
+    Not automatically applied by updating this integration.
+  fields:
+    date:
+      required: true
+      example: "2026-11-03"
+      description: >-
+        First date to retain in Home Assistant's configured local timezone.
+      selector:
+        date:
+    dry_run:
+      required: false
+      default: true
+      description: Preview only; no data is changed when true.
+      selector:
+        boolean:
+    confirm_delete_pre_cutoff:
+      required: false
+      default: false
+      description: >-
+        Explicitly confirm removal of older Tado-derived allocations.
+        Must be true together with dry_run=false to make any changes.
+      selector:
+        boolean:
+    config_entry:
+      required: false
+      selector:
+        config_entry:
+          integration: tado
+
 x_scan_vaillant_hourly_quality:
   name: Find first non-uniform Vaillant heating-gas day
   description: >-

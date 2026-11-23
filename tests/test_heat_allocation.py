@@ -597,5 +597,187 @@ class AllocationTests(unittest.TestCase):
         self.assertIsNone(report["candidate_cutoff_day"])
 
 
+    def test_confirmed_cutoff_previews_then_deletes_only_tado_v2_and_rebuilds(self):
+        """Confirmed migration must be strictly household-scoped and rebase sums."""
+        from zoneinfo import ZoneInfo
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        local = datetime.now(ZoneInfo("Europe/Brussels"))
+        day = (local.date() - timedelta(days=1))
+        cutoff = datetime(
+            day.year, day.month, day.day, tzinfo=ZoneInfo("Europe/Brussels")
+        ).astimezone(timezone.utc)
+        end = datetime.now(timezone.utc).replace(
+            minute=0, second=0, microsecond=0
+        )
+        count = int((end - cutoff).total_seconds() // 3600)
+        source = [
+            {"start": (cutoff - timedelta(hours=1)).timestamp(), "sum": 1000}
+        ]
+        r1, r2 = [], []
+        for i in range(count):
+            t = (cutoff+timedelta(hours=i)).timestamp()
+            source.append({"start": t, "sum": 1100 + 100*i})
+            r1.append({"start": t, "mean": 100})
+            r2.append({"start": t, "mean": 0})
+        raw = {
+            "mypyllant:heating": source,
+            "sensor.r1": r1,
+            "sensor.r2": r2,
+        }
+        saved = {}
+        removals = []
+        writes = []
+        config_changes = []
+        def update_entry(entry, *, options):
+            entry.options = options
+            config_changes.append(dict(options))
+        self.hass.config_entries = SimpleNamespace(async_update_entry=update_entry)
+
+        class FakeRecorder:
+            def async_clear_statistics(self, ids, *, start_time, end_time, on_done):
+                removals.append((ids, start_time, end_time))
+                on_done()
+            async def async_block_till_done(self):
+                return None
+
+        async def fetch(hass, start, end_time, ids, period="hour"):
+            if "mypyllant:heating" in ids:
+                return raw
+            if end_time <= cutoff:
+                return {}
+            return saved
+
+        def add_stats(hass, meta, rows):
+            writes.append((meta, rows))
+            saved[meta["statistic_id"]] = [
+                dict(r, start=r["start"].timestamp()) for r in rows
+            ]
+        async def run_case(dry_run, confirm=False):
+            self.hass.loop = asyncio.get_running_loop()
+            return await allocation.configure_heating_allocation_cutoff(
+                self.hass, self.main, date=day.isoformat(),
+                dry_run=dry_run, confirm_delete_pre_cutoff=confirm,
+            )
+
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101":"sensor.r1","102":"sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101":1.0,"102":1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "get_instance", return_value=FakeRecorder()),
+            patch.object(allocation, "async_add_external_statistics", add_stats),
+        ):
+            preview = asyncio.run(run_case(True))
+            self.assertEqual(preview["status"], "cutoff_preview")
+            self.assertEqual(preview["target_statistic_count"], 3)
+            self.assertEqual(preview["retained_hours_per_statistic"], count)
+            self.assertEqual(preview["retained_statistic_rows_to_rebuild"], count*3)
+            self.assertFalse(removals)
+            self.assertFalse(writes)
+            self.assertFalse(config_changes)
+            with self.assertRaisesRegex(Exception, "confirm_delete_pre_cutoff"):
+                asyncio.run(run_case(False, confirm=False))
+            self.assertFalse(removals)
+            result = asyncio.run(run_case(False, confirm=True))
+        self.assertEqual(result["status"], "cutoff_applied")
+        self.assertFalse(result["migration_pending"])
+        self.assertEqual(len(removals), 1)
+        self.assertEqual(set(removals[0][0]), {
+            allocation._stat_id(self.main,z) for z in ("101","102","unallocated")
+        })
+        self.assertNotIn("mypyllant:heating", removals[0][0])
+        self.assertEqual(removals[0][2], cutoff)
+        self.assertEqual(len(writes), 3)
+        self.assertAlmostEqual(
+            saved[allocation._stat_id(self.main,"101")][-1]["sum"], count*0.1
+        )
+        self.assertAlmostEqual(
+            saved[allocation._stat_id(self.main,"102")][-1]["sum"], 0
+        )
+        self.assertEqual(config_changes[-1][allocation.CUTOFF_COMPLETE_OPTION], True)
+        self.assertEqual(
+            allocation._allocation_cutoff(self.main), cutoff
+        )
+
+    def test_cutoff_missing_source_aborts_without_side_effects(self):
+        """No old rows may be deleted when a retained source hour is missing."""
+        from zoneinfo import ZoneInfo
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        local = datetime.now(ZoneInfo("Europe/Brussels"))
+        day = local.date() - timedelta(days=1)
+        cutoff = datetime(
+            day.year, day.month, day.day, tzinfo=ZoneInfo("Europe/Brussels")
+        ).astimezone(timezone.utc)
+        source = [{
+            "start": (cutoff-timedelta(hours=1)).timestamp(), "sum": 1000
+        }]
+        async def fetch(*args, **kwargs):
+            return {"mypyllant:heating": source}
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101":"sensor.r1","102":"sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101":1.0,"102":1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "get_instance",
+                         side_effect=AssertionError("no Recorder deletion")),
+            patch.object(allocation, "async_add_external_statistics",
+                         side_effect=AssertionError("no derived statistics edits")),
+        ):
+            report = asyncio.run(allocation.configure_heating_allocation_cutoff(
+                self.hass, self.main, date=day.isoformat(),
+                dry_run=False, confirm_delete_pre_cutoff=True,
+            ))
+        self.assertEqual(report["status"], "blocked_missing_or_invalid_vaillant_hours")
+        self.assertTrue(report["no_statistics_modified"])
+
+    def test_cutoff_clips_history_and_blocks_older_reconciliation(self):
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        self.main.config_entry.options[allocation.CUTOFF_OPTION] = (
+            "2026-11-02T23:00:00+00:00"
+        )
+        self.main.config_entry.options[allocation.CUTOFF_COMPLETE_OPTION] = True
+        captured = []
+        async def live(hass, main, start, end, period, group, tz):
+            captured.append((start, end, period))
+            return {"period":period,"series":[],"data_mode":"live_reconciled"}
+        with patch.object(allocation, "_live_reconciled_history", live):
+            result = asyncio.run(allocation.allocation_history(
+                self.hass, self.main, period="month",
+                start_time="2026-10-15T00:00:00+02:00",
+                end_time="2026-11-05T00:00:00+01:00",
+            ))
+            ignored = asyncio.run(allocation.reconciliation_report(
+                self.hass, self.main, date="2026-11-02"
+            ))
+        self.assertEqual(result["data_mode"], "live_reconciled")
+        self.assertEqual(captured[0][0].isoformat(), "2026-11-02T23:00:00+00:00")
+        self.assertEqual(ignored["status"], "before_allocation_cutoff")
+        self.assertEqual(len(captured), 1)
+        earlier = asyncio.run(allocation.allocation_history(
+            self.hass, self.main, period="day",
+            start_time="2026-10-31T00:00:00+01:00",
+            end_time="2026-11-02T00:00:00+01:00",
+        ))
+        self.assertEqual(earlier["data_mode"], "no_data_before_cutoff")
+        self.assertEqual(earlier["series"], [])
+
+    def test_pending_cutoff_disables_hourly_writes(self):
+        self.main.config_entry.options[allocation.CUTOFF_OPTION] = (
+            "2026-11-02T23:00:00+00:00"
+        )
+        self.main.config_entry.options[allocation.CUTOFF_COMPLETE_OPTION] = False
+        with patch.object(allocation, "async_add_external_statistics",
+                          side_effect=AssertionError("migration not finished")):
+            result = asyncio.run(allocation.allocate_recent(
+                self.hass, self.main, days=3
+            ))
+        self.assertEqual(result["status"], "allocation_cutoff_cleanup_pending")
+        self.assertTrue(result["no_statistics_modified"])
+
+
 if __name__=="__main__":
     unittest.main()
