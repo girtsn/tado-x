@@ -210,5 +210,87 @@ class AllocationTests(unittest.TestCase):
         self.assertFalse(self.writes)
 
 
+    def test_recent_history_reconciles_against_updated_source_without_writes(self):
+        """A source value revised after v2 publication must win in the UI."""
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        older = (self.end - timedelta(hours=3)).timestamp()
+        raw = {
+            "mypyllant:heating": [
+                {"start": older, "sum": 1000},
+                {"start": self.t0, "sum": 3000},
+                {"start": self.t1, "sum": 5000},
+            ],
+            "sensor.r1": [
+                {"start": self.t0, "mean": 25},
+                {"start": self.t1, "mean": 50},
+            ],
+            "sensor.r2": [
+                {"start": self.t0, "mean": 75},
+                {"start": self.t1, "mean": 50},
+            ],
+        }
+        for zid in ("101", "102", "unallocated"):
+            statistic_id = allocation._stat_id(self.main, zid)
+            raw[statistic_id] = [
+                {"start": older, "sum": 0},
+                {"start": self.t0, "sum": 0.25},
+                {"start": self.t1, "sum": 0.50},
+            ] if zid != "unallocated" else [
+                {"start": older, "sum": 0},
+                {"start": self.t0, "sum": 0},
+                {"start": self.t1, "sum": 0},
+            ]
+        async def fetch(*args, **kwargs):
+            return raw
+        with (
+            patch.object(allocation, "_gas_statistic", return_value="mypyllant:heating"),
+            patch.object(allocation, "_room_sensor_ids",
+                         return_value={"101": "sensor.r1", "102": "sensor.r2"}),
+            patch.object(allocation, "_capacities",
+                         return_value={"101": 1.0, "102": 1.0}),
+            patch.object(allocation, "_fetch", fetch),
+            patch.object(allocation, "async_add_external_statistics",
+                         side_effect=AssertionError("Read-only call must never write")),
+        ):
+            result = asyncio.run(allocation.allocation_history(
+                self.hass, self.main, period="day",
+                start_time=datetime.fromtimestamp(self.t0,timezone.utc).isoformat(),
+                end_time=self.end.isoformat(),
+            ))
+        self.assertEqual(result["data_mode"], "live_reconciled")
+        self.assertEqual(result["vaillant_heating_kwh"], 4.0)
+        self.assertEqual(result["allocated_kwh"], 4.0)
+        self.assertEqual(result["unallocated_kwh"], 0)
+        self.assertEqual(result["legacy_stored_kwh"], 1.0)
+        self.assertEqual(result["legacy_difference_kwh"], 3.0)
+        self.assertEqual(result["stale_stored_hours"], 2)
+        self.assertEqual(result["source_hours"], 2)
+        self.assertEqual(result["missing_source_hours"], 0)
+        total = sum(sum(float(r.get(room, 0)) for room in result["rooms"])
+                    for r in result["series"])
+        self.assertAlmostEqual(total, 4.0, places=2)
+
+    def test_reconciliation_uses_home_assistant_day_and_dst(self):
+        self.hass.config = SimpleNamespace(time_zone="Europe/Brussels")
+        spans = []
+        async def live(hass, main, start, end, period, group, tz):
+            spans.append((start, end, period, group, str(tz)))
+            return {"read_only": True}
+        with patch.object(allocation, "_live_reconciled_history", live):
+            a = asyncio.run(allocation.reconciliation_report(
+                self.hass, self.main, date="2026-03-29"
+            ))
+            b = asyncio.run(allocation.reconciliation_report(
+                self.hass, self.main, date="2026-10-25"
+            ))
+        self.assertEqual(a["status"], "reconciliation_completed")
+        self.assertEqual(b["date"], "2026-10-25")
+        self.assertEqual((spans[0][1]-spans[0][0]).total_seconds(), 23*3600)
+        self.assertEqual((spans[1][1]-spans[1][0]).total_seconds(), 25*3600)
+        self.assertEqual(spans[0][0].isoformat(), "2026-03-28T23:00:00+00:00")
+        self.assertEqual(spans[1][0].isoformat(), "2026-10-24T22:00:00+00:00")
+
+
+
 if __name__=="__main__":
     unittest.main()
