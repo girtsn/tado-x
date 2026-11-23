@@ -1,8 +1,12 @@
-/* Shared Energy-style calendar picker. Dates are HA-local calendar days,
- * independent of the viewing browser's timezone (including DST transitions).
- * Civil calendar arithmetic is performed on UTC-midnight surrogate Date objects.
+/* Shared Energy-style calendar picker. Honor HA user-profile time zone:
+ * "local" = this viewing device; "server" = HA configured location.
+ * UTC-midnight surrogate civil dates preserve correct 23/25h DST boundaries.
  */
-const xhZone=hass=>hass?.config?.time_zone||"UTC";
+const xhZone=hass=>{
+  const server=hass?.config?.time_zone||"UTC";
+  if(hass?.locale?.time_zone!=="local")return server;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone||server;
+};
 const xhCivil=(instant,zone)=>{
   const values=Object.fromEntries(new Intl.DateTimeFormat("en-GB",{
     timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"
@@ -78,8 +82,20 @@ class TadoXDateRangePicker extends HTMLElement {
   set hass(value){
     const previous=this._hass;
     this._hass=value;
-    if((!previous||xhZone(previous)!==xhZone(value)||
-      xhFirstWeekday(previous)!==xhFirstWeekday(value))&&this._range?.preset==="week"){
+    const zoneChanged=previous&&xhZone(previous)!==xhZone(value);
+    if(zoneChanged&&this._range?.preset!=="last24"){
+      // Preserve the chosen *calendar dates* when a user switches between
+      // local/server time. Recompute the UTC instants for the new zone.
+      const start=xhCivil(new Date(this._range.start),xhZone(previous));
+      const end=xhCivil(new Date(this._range.end),xhZone(previous));
+      this._range={...this._range,
+        start:xhToUtc(start,value),end:xhToUtc(end,value)};
+      this._month=xhToday(value);
+      this.dispatchEvent(new CustomEvent("date-range-changed",{
+        detail:this._range,bubbles:true,composed:true
+      }));
+    }else if((!previous||xhFirstWeekday(previous)!==xhFirstWeekday(value))
+      &&this._range?.preset==="week"){
       this._range=xhPresetRange("week",new Date(),value);
       this._month=xhToday(value);
       this.dispatchEvent(new CustomEvent("date-range-changed",{
@@ -279,4 +295,4 @@ if(!customElements.get(XH_COMPONENT_TAG))
 if(!customElements.get("tado-x-date-range-picker"))
   customElements.define("tado-x-date-range-picker",TadoXDateRangePicker);
 
-export { xhPresetRange };
+export { xhPresetRange, xhZone };
