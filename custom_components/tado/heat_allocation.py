@@ -218,6 +218,210 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     }
 
 
+
+async def _live_reconciled_history(
+    hass, main, start: datetime, end: datetime, period: str,
+    group: str, tz: ZoneInfo,
+) -> dict | None:
+    """Recompute display estimates from CURRENT hourly Recorder inputs.
+
+    Previously published v2 room statistics can be permanently stale if
+    myPyllant revises hourly gas statistics after the append-only publication.
+    Never edit or rebase those statistics here. Prefer a read-only reconstruction
+    for bounded date ranges, retaining the archived data for longer views.
+    """
+    if end - start > timedelta(days=92):
+        return None
+    source_id = _gas_statistic(hass)
+    if source_id is None:
+        return None
+    room_sensors = _room_sensor_ids(hass, main)
+    if len(room_sensors) != len(main.zones):
+        return None
+    try:
+        capacities = _capacities(main)
+    except HomeAssistantError:
+        return None
+
+    names = {str(z["id"]): str(z.get("name", z["id"])) for z in main.zones}
+    names["unallocated"] = "Unallocated"
+    ids = {source_id} | set(room_sensors.values()) | {
+        _stat_id(main, zone_id) for zone_id in names
+    }
+    data = await _fetch(
+        hass, start - timedelta(hours=1), end, ids, "hour"
+    )
+    source = _rows_by_start(data.get(source_id))
+    demands = {
+        zid: _rows_by_start(data.get(sensor_id))
+        for zid, sensor_id in room_sensors.items()
+    }
+    stored = {
+        zid: _rows_by_start(data.get(_stat_id(main, zid)))
+        for zid in names
+    }
+    timeline: dict[str, dict[str, float]] = {}
+    hourly: list[dict[str, Any]] = []
+    input_total = stored_total = unknown_total = 0.0
+    valid_hours = missing_hours = stale_hours = 0
+    hour = start
+    while hour < end:
+        t = hour.timestamp()
+        prev_t = (hour - timedelta(hours=1)).timestamp()
+        current, previous = source.get(t), source.get(prev_t)
+        if (
+            current is None or previous is None
+            or current.get("sum") is None or previous.get("sum") is None
+        ):
+            missing_hours += 1
+            hour += timedelta(hours=1)
+            continue
+        delta_wh = float(current["sum"]) - float(previous["sum"])
+        if not 0 <= delta_wh <= 200000:
+            missing_hours += 1
+            hour += timedelta(hours=1)
+            continue
+        gas_kwh = delta_wh * KWH_PER_WH
+        valid_hours += 1
+        input_total += gas_kwh
+
+        measurements = {}
+        for zid, samples in demands.items():
+            sample = samples.get(t)
+            raw = sample.get("mean") if sample is not None else None
+            try:
+                measurements[zid] = float(raw) if raw is not None else None
+            except (ValueError, TypeError):
+                measurements[zid] = None
+        if any(v is None or not 0 <= v <= 100 for v in measurements.values()):
+            values = {zid: 0.0 for zid in room_sensors}
+            unknown = gas_kwh
+        else:
+            weights = {
+                zid: float(value) * capacities[zid]
+                for zid, value in measurements.items()
+            }
+            weight_total = sum(weights.values())
+            values = {
+                zid: gas_kwh * weight / weight_total if weight_total > 0 else 0.0
+                for zid, weight in weights.items()
+            }
+            unknown = gas_kwh if weight_total == 0 else 0.0
+        unknown_total += unknown
+        values["unallocated"] = unknown
+
+        local = hour.astimezone(tz)
+        key = (
+            local.strftime("%Y-%m") if group == "month" else
+            local.strftime("%Y-%m-%d") if group == "day" else
+            local.strftime("%Y-%m-%dT%H:00")
+        )
+        slot = timeline.setdefault(key, {})
+        for zid, amount in values.items():
+            room_name = names[zid]
+            slot[room_name] = slot.get(room_name, 0.0) + amount
+
+        old_amount = 0.0
+        complete_stored = True
+        for zid, samples in stored.items():
+            current_stored = samples.get(t)
+            prior_stored = samples.get(prev_t)
+            if (
+                current_stored is not None and prior_stored is not None
+                and current_stored.get("sum") is not None
+                and prior_stored.get("sum") is not None
+            ):
+                old_amount += max(
+                    0.0, float(current_stored["sum"]) - float(prior_stored["sum"])
+                )
+            elif current_stored is not None and current_stored.get("state") is not None:
+                old_amount += max(0.0, float(current_stored["state"]))
+            else:
+                complete_stored = False
+        if complete_stored:
+            stored_total += old_amount
+        if not complete_stored or abs(old_amount - gas_kwh) > 0.05:
+            stale_hours += 1
+        hourly.append({
+            "start_local": local.isoformat(timespec="minutes"),
+            "vaillant_kwh": round(gas_kwh, 3),
+            "stored_v2_kwh": round(old_amount, 3) if complete_stored else None,
+            "current_allocated_kwh": round(gas_kwh - unknown, 3),
+            "unallocated_kwh": round(unknown, 3),
+            "difference_kwh": round(gas_kwh - old_amount, 3)
+                if complete_stored else None,
+            "stored_complete": complete_stored,
+        })
+        hour += timedelta(hours=1)
+
+    if valid_hours == 0:
+        return None
+    return {
+        "period": period,
+        "start_time": start.isoformat(),
+        "end_time": end.isoformat(),
+        "unit": "kWh of estimated heating gas input",
+        "source": "Live Vaillant hourly gas input + tado demand (Recorder, read-only)",
+        "capacity_basis": "Installed radiator EN442 75/65/20, weighted by hourly tado demand",
+        "data_mode": "live_reconciled",
+        "complete": missing_hours == 0,
+        "read_only": True,
+        "source_hours": valid_hours,
+        "missing_source_hours": missing_hours,
+        "stale_stored_hours": stale_hours,
+        "vaillant_heating_kwh": round(input_total, 3),
+        "allocated_kwh": round(input_total - unknown_total, 3),
+        "unallocated_kwh": round(unknown_total, 3),
+        "legacy_stored_kwh": round(stored_total, 3),
+        "legacy_difference_kwh": round(input_total - stored_total, 3),
+        "rooms": list(names.values()),
+        "series": [
+            {"period": key, **{n: round(v, 3) for n, v in values.items()}}
+            for key, values in sorted(timeline.items())
+        ],
+        "hourly_reconciliation": hourly,
+        "note": (
+            "Recent history is recomputed from CURRENT hourly source statistics. "
+            "Previously published v2 external statistics are not modified and "
+            "may contain stale gas amounts. Long ranges still use archived v2 "
+            "estimates; a separate archival migration may be needed."
+        ),
+    }
+
+
+async def reconciliation_report(
+    hass, main, date: str | None = None,
+) -> dict:
+    """Read-only hourly comparison for one Home Assistant calendar day."""
+    tz = ZoneInfo(hass.config.time_zone or "UTC")
+    if date is None:
+        target_day = datetime.now(tz).date() - timedelta(days=1)
+    else:
+        from datetime import date as date_type
+        try:
+            target_day = date_type.fromisoformat(date)
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError("Date must be YYYY-MM-DD") from err
+    start_local = datetime(
+        target_day.year, target_day.month, target_day.day, tzinfo=tz
+    )
+    next_day = target_day + timedelta(days=1)
+    end_local = datetime(
+        next_day.year, next_day.month, next_day.day, tzinfo=tz
+    )
+    start, end = start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+    report = await _live_reconciled_history(
+        hass, main, start, end, "day", "hour", tz
+    )
+    if report is None:
+        return {
+            "status": "no_reconcilable_hourly_data",
+            "date": target_day.isoformat(),
+            "read_only": True,
+        }
+    return {"status": "reconciliation_completed", "date": target_day.isoformat(), **report}
+
+
 async def allocation_history(
     hass, main, period: str = "month", *,
     start_time: str | None = None, end_time: str | None = None,
@@ -258,6 +462,12 @@ async def allocation_history(
         start = end - timedelta(days=days)
         group = ("month" if period in ("year", "3years") else
                  "day" if period in ("week", "month") else "hour")
+
+    # Recalculate bounded selections from the latest Vaillant source values,
+    # rather than relying on append-only historic v2 room allocations.
+    live = await _live_reconciled_history(hass, main, start, end, period, group, tz)
+    if live is not None:
+        return live
 
     # For precise custom ranges read daily rows and bucket them into months.
     # This avoids counting whole months outside a custom date range.
