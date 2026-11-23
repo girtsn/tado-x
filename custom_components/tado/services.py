@@ -9,7 +9,10 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import selector
 
 from .tadox_ext import DAYS, TadoXClient, canonical_day, schedule_signature
-from .heat_allocation import allocate_recent, allocation_history, diagnose_unallocated, reconciliation_report
+from .heat_allocation import (
+    allocate_recent, allocation_history, diagnose_unallocated,
+    reconciliation_report, detect_vaillant_hourly_start,
+)
 from .radiator_inventory import radiator_capacity_report, GROUP_PHYSICAL_IDS
 from .room_override import room_override_report, observed_home_mode
 from .x_features import energy_enabled
@@ -319,6 +322,34 @@ def setup_services(
             schema=vol.Schema({
                 **home,
                 vol.Optional("date"): str,
+            }),
+            supports_response=SupportsResponse.ONLY,
+        )
+
+        async def x_scan_vaillant_hourly_quality(call: ServiceCall) -> dict:
+            """Identify suspect uniformly distributed older Vaillant gas days."""
+            get_x_coordinator(call, energy=True)
+            return await detect_vaillant_hourly_start(
+                hass,
+                days=call.data.get("days", 120),
+                tolerance_wh=call.data.get("tolerance_wh", 1.0),
+                confirmation_days=call.data.get("confirmation_days", 3),
+            )
+
+        hass.services.async_register(
+            DOMAIN, "x_scan_vaillant_hourly_quality",
+            x_scan_vaillant_hourly_quality,
+            schema=vol.Schema({
+                **home,
+                vol.Optional("days", default=120): vol.All(
+                    vol.Coerce(int), vol.Range(min=3, max=365)
+                ),
+                vol.Optional("tolerance_wh", default=1.0): vol.All(
+                    vol.Coerce(float), vol.Range(min=0, max=50)
+                ),
+                vol.Optional("confirmation_days", default=3): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=7)
+                ),
             }),
             supports_response=SupportsResponse.ONLY,
         )
