@@ -51,4 +51,32 @@ assert.equal(Array.from(card._displayDays()).join(","),
 card._hass=profile("monday");
 assert.equal(Array.from(card._displayDays()).join(","),
   "MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY");
+
+// Date boundaries must follow Home Assistant's configured timezone regardless
+// of the viewing phone's timezone, including 23/25-hour DST days.
+const brussels={config:{time_zone:"Europe/Brussels"},
+  locale:{first_weekday:"monday",language:"en-GB"}};
+const nearMidnight=new Date("2026-11-22T23:30:00.000Z"); // Nov 23 in Brussels
+const previous= presetRange("yesterday",nearMidnight,brussels);
+assert.equal(previous.start,"2026-11-21T23:00:00.000Z");
+assert.equal(previous.end,"2026-11-22T23:00:00.000Z");
+const spring=presetRange("today",new Date("2026-03-29T12:00:00.000Z"),brussels);
+assert.equal(spring.start,"2026-03-28T23:00:00.000Z");
+assert.equal(spring.end,"2026-03-29T22:00:00.000Z"); // 23h DST
+const autumn=presetRange("today",new Date("2026-10-25T12:00:00.000Z"),brussels);
+assert.equal(autumn.start,"2026-10-24T22:00:00.000Z");
+assert.equal(autumn.end,"2026-10-25T23:00:00.000Z"); // 25h DST
+const specificDay=new Picker();
+specificDay.hass=brussels;
+specificDay._dayClick(new Date(Date.UTC(2026,10,22)));
+assert.equal(specificDay._draftEnd.toISOString(),"2026-11-23T00:00:00.000Z",
+  "First click should already select one complete calendar day");
+specificDay._apply(specificDay._draftStart,specificDay._draftEnd,"custom");
+assert.equal(specificDay.range.start,previous.start);
+assert.equal(specificDay.range.end,previous.end);
+const york={config:{time_zone:"America/New_York"},locale:{first_weekday:"sunday"}};
+const yorkToday=presetRange("today",nearMidnight,york);
+assert.equal(yorkToday.start,"2026-11-22T05:00:00.000Z");
+assert.equal(yorkToday.end,"2026-11-23T05:00:00.000Z");
+
 console.log("Home Assistant first-weekday regression tests passed");
