@@ -564,6 +564,56 @@ existing statistic IDs; no duplicate v3 series are created. The current
 recalculation window is capped at 35 days, but previously corrected older
 hours remain valid in long-range dashboards.
 
+#### Optional, one-time household historical cutoff
+
+For households where older Vaillant hourly gas rows actually represent a
+synthetic daily total divided evenly over 24 hours, first run the read-only
+`tado.x_scan_vaillant_hourly_quality` action to determine the genuine
+hourly-data transition. This varies by household; the integration does not
+impose a global cutoff and never deletes history merely by upgrading.
+
+After making a **Home Assistant backup**, preview the one-time correction:
+
+```yaml
+action: tado.x_apply_heating_allocation_cutoff
+data:
+  date: "2026-11-03"
+  dry_run: true
+```
+
+For the specific home whose scanned first real-looking hourly day is
+**2026-11-03 in Europe/Brussels**, then use:
+
+```yaml
+action: tado.x_apply_heating_allocation_cutoff
+data:
+  date: "2026-11-03"
+  dry_run: false
+  confirm_delete_pre_cutoff: true
+```
+
+This explicitly scoped operation first validates every retained Vaillant
+hour. It then permanently deletes only the **11 derived Tado X v2 room-gas
+allocation statistics** (10 rooms and Unallocated) prior to the cutoff using
+Home Assistant's supported range-based Recorder cleanup. It also rewrites
+the entire retained Tado v2 hourly allocation and cumulative sums with a
+zero baseline, waits for queued writes to commit, verifies rebuilt first and
+last rows, and persists the cutoff in this specific config entry. The
+original Vaillant Gas Heating, domestic hot water, and Tado heating demand
+source histories are not deleted or modified.
+
+Once activated, scheduled and manual reconciliation, room-allocation history
+views and unallocated diagnostics respect the cutoff. Existing dashboard
+period selections earlier than the cutoff return no derived room allocations.
+A failed/interrupted migration leaves subsequent automatic writes paused
+until the explicit action is retried with the same date. Neither the action
+nor an upgrade changes unrelated households.
+
+**Important:** A cutoff is a data-quality judgment; non-uniform Vaillant
+hourly values are evidence but not proof of truly measured hourly energy.
+The Vaillant daily-total vs hourly-sum discrepancy remains a separate
+unresolved source issue and is not normalized away.
+
 For the dashboard add another **JavaScript module** resource:
 
 `/tado/x-heating-energy-card.js?v=2026.11.7`
