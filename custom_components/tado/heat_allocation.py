@@ -479,6 +479,175 @@ async def _live_reconciled_history(
     }
 
 
+
+async def detect_vaillant_hourly_start(
+    hass, *, days: int = 120, tolerance_wh: float = 1.0,
+    confirmation_days: int = 3,
+) -> dict:
+    """Find the earliest complete day whose hourly gas is not uniform.
+
+    This is an *indicator*, not proof of measured hourlies: the same daily
+    amount divided by 24 (or 23/25 at DST) produces suspiciously identical
+    input deltas. Search the ORIGINAL myPyllant hourly heating profile; no
+    tado statistics or other Recorder records are read or changed.
+    """
+    from datetime import time as date_time
+
+    if not 3 <= days <= 365:
+        raise HomeAssistantError("Scan days must be between 3 and 365")
+    if not 0 <= tolerance_wh <= 50:
+        raise HomeAssistantError("Hourly uniformity tolerance must be 0–50 Wh")
+    if not 1 <= confirmation_days <= 7:
+        raise HomeAssistantError("Confirmation days must be between 1 and 7")
+
+    source_id = _gas_statistic(hass)
+    if source_id is None:
+        return {
+            "status": "no_unique_vaillant_gas_heating_statistic",
+            "read_only": True,
+            "no_statistics_modified": True,
+        }
+
+    tz = ZoneInfo(hass.config.time_zone or "UTC")
+    today = datetime.now(tz).date()
+    first_day = today - timedelta(days=days)
+    make_local = lambda d: datetime.combine(d, date_time.min, tzinfo=tz)
+    start = make_local(first_day).astimezone(timezone.utc)
+    end = make_local(today).astimezone(timezone.utc)
+    fetched = await _fetch(
+        hass, start - timedelta(hours=1), end, {source_id}, "hour"
+    )
+    sums = _rows_by_start(fetched.get(source_id))
+
+    report = []
+    daily_dates = []
+    day = first_day
+    while day < today:
+        next_day = day + timedelta(days=1)
+        start_utc = make_local(day).astimezone(timezone.utc)
+        end_utc = make_local(next_day).astimezone(timezone.utc)
+        expected = int((end_utc - start_utc).total_seconds() // 3600)
+        values = []
+        missing = 0
+        for offset in range(expected):
+            stamp = (start_utc + timedelta(hours=offset)).timestamp()
+            current, previous = sums.get(stamp), sums.get(stamp - 3600)
+            if current is None or previous is None or (
+                current.get("sum") is None or previous.get("sum") is None
+            ):
+                missing += 1
+                continue
+            delta = float(current["sum"]) - float(previous["sum"])
+            if not 0 <= delta <= 200000:
+                missing += 1
+                continue
+            values.append(delta)
+        if missing:
+            classification = "incomplete"
+        elif not values or sum(values) <= tolerance_wh:
+            classification = "no_heating"
+        elif max(values) - min(values) <= tolerance_wh:
+            classification = "uniform_positive_suspected_backfill"
+        else:
+            classification = "nonuniform"
+
+        sample = {
+            "date": day.isoformat(),
+            "classification": classification,
+            "expected_hours": expected,
+            "valid_hours": len(values),
+            "missing_hours": missing,
+            "heating_kwh": round(sum(values) * KWH_PER_WH, 3),
+            "min_hour_kwh": round(min(values) * KWH_PER_WH, 4)
+                if values else None,
+            "max_hour_kwh": round(max(values) * KWH_PER_WH, 4)
+                if values else None,
+            "spread_wh": round(max(values) - min(values), 3)
+                if values else None,
+        }
+        report.append(sample)
+        daily_dates.append(day)
+        day = next_day
+
+    first_nonuniform = next(
+        (i for i, r in enumerate(report) if r["classification"] == "nonuniform"),
+        None
+    )
+    last_uniform = next((
+        i for i in range(len(report) - 1, -1, -1)
+        if report[i]["classification"] == "uniform_positive_suspected_backfill"
+    ), None)
+    stable_candidates = [
+        i for i in range(len(report) - confirmation_days + 1)
+        if all(
+            report[k]["classification"] == "nonuniform"
+            for k in range(i, i + confirmation_days)
+        )
+    ]
+    first_stable = stable_candidates[0] if stable_candidates else None
+    after_uniform = next((
+        i for i in stable_candidates
+        if last_uniform is not None and i > last_uniform
+    ), None)
+    cutoff = after_uniform if last_uniform is not None else first_stable
+    anchor = cutoff if cutoff is not None else (
+        last_uniform if last_uniform is not None else first_nonuniform
+    )
+    window = report[
+        max(0, anchor - 6):min(len(report), anchor + 8)
+    ] if anchor is not None else report[:min(14, len(report))]
+
+    counts = {
+        key: sum(r["classification"] == key for r in report)
+        for key in (
+            "uniform_positive_suspected_backfill", "nonuniform",
+            "no_heating", "incomplete",
+        )
+    }
+    first_data = next(
+        (r["date"] for r in report if r["valid_hours"] > 0), None
+    )
+    return {
+        "status": "hourly_uniformity_scan_completed",
+        "read_only": True,
+        "no_statistics_modified": True,
+        "source": "Original myPyllant hourly Gas Heating Recorder statistic",
+        "source_statistic_id": source_id,
+        "timezone": str(tz),
+        "scan_start_date": first_day.isoformat(),
+        "scan_end_date_inclusive": (today - timedelta(days=1)).isoformat(),
+        "days_scanned": days,
+        "tolerance_wh": tolerance_wh,
+        "confirmation_days": confirmation_days,
+        "classification_counts": counts,
+        "first_day_with_hourly_data": first_data,
+        "first_complete_nonuniform_day": (
+            report[first_nonuniform]["date"]
+            if first_nonuniform is not None else None
+        ),
+        "first_consecutive_nonuniform_day": (
+            report[first_stable]["date"] if first_stable is not None else None
+        ),
+        "last_uniform_positive_day": (
+            report[last_uniform]["date"] if last_uniform is not None else None
+        ),
+        "candidate_cutoff_day": (
+            report[cutoff]["date"] if cutoff is not None else None
+        ),
+        "candidate_is_proven_measured_hourly": False,
+        "transition_window": window,
+        "note": (
+            "Equal positive hourly deltas suggest daily totals divided evenly "
+            "into hourly buckets, but cannot prove how Vaillant generated them. "
+            "The candidate is the first run of consecutive nonuniform days "
+            "AFTER the last suspicious uniform-positive day in the scanned "
+            "window (or the first such run if none were uniform). "
+            "Missing and zero-heating days are not evidence of synthetic data. "
+            "This action does not set a cutoff, delete records, or edit statistics."
+        ),
+    }
+
+
 async def reconciliation_report(
     hass, main, date: str | None = None,
 ) -> dict:
