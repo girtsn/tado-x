@@ -10,7 +10,8 @@ individual radiator energy. No Vaillant recorder/statistic/source is modified.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date as calendar_date, datetime, timedelta, timezone
+import asyncio
 import logging
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -30,10 +31,34 @@ PREFIX = "tado:x_radiator_weighted_gas_heating_v2_"
 GAS_PROFILE = ("CONSUMED_PRIMARY_ENERGY", "HEATING")
 KWH_PER_WH = 0.001
 MAX_BACKFILL_DAYS = 35
+CUTOFF_OPTION = "x_gas_allocation_cutoff_utc"
+CUTOFF_COMPLETE_OPTION = "x_gas_allocation_cutoff_applied"
 
 
 def _stat_id(main, zone_id: int | str) -> str:
     return f"{PREFIX}{main.home_id}_{zone_id}"
+
+
+def _allocation_cutoff(main) -> datetime | None:
+    """Return per-household UTC cutoff or None (never a global cutoff)."""
+    value = main.config_entry.options.get(CUTOFF_OPTION)
+    if not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as err:
+        raise HomeAssistantError("Invalid saved heating allocation cutoff") from err
+    if stamp.tzinfo is None:
+        raise HomeAssistantError("Saved heating allocation cutoff requires UTC offset")
+    return stamp.astimezone(timezone.utc)
+
+
+def _cutoff_pending(main) -> bool:
+    return bool(_allocation_cutoff(main)) and not main.config_entry.options.get(
+        CUTOFF_COMPLETE_OPTION, False
+    )
+
+
 
 
 def _capacities(main) -> dict[str, float]:
@@ -136,6 +161,13 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
         raise HomeAssistantError("Reconciliation days must be between 1 and 35")
     if not getattr(main, "is_x", False):
         raise HomeAssistantError("Heating allocation requires tado X")
+    if _cutoff_pending(main):
+        return {
+            "status": "allocation_cutoff_cleanup_pending",
+            "no_statistics_modified": True,
+            "message": "Finish/retry the explicit confirmed cutoff cleanup before "
+                       "automatic allocation publishes further statistics.",
+        }
     source_id = _gas_statistic(hass)
     if source_id is None:
         return {
@@ -165,7 +197,16 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     end = datetime.now(timezone.utc).replace(
         minute=0, second=0, microsecond=0
     )
-    requested_start = end - timedelta(days=days)
+    cutoff = _allocation_cutoff(main)
+    requested_start = max(end - timedelta(days=days), cutoff) if cutoff else (
+        end - timedelta(days=days)
+    )
+    if requested_start >= end:
+        return {
+            "status": "no_hours_after_cutoff",
+            "no_statistics_modified": True,
+            "hours": 0,
+        }
     zone_ids = (*room_sensors, "unallocated")
     out_ids = {_stat_id(main, zid) for zid in zone_ids}
     snapshots = await _fetch(
@@ -200,9 +241,11 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
     if not valid_source:
         return {"status": "no_valid_source_hours",
                 "hours": 0, "no_statistics_modified": True}
-    start_ts = max(
-        requested_start.timestamp(),
-        published[0] if published else valid_source[0],
+    # With an applied cutoff the rebuilt archive begins exactly at that hour,
+    # even if the first old v2 row appears later than the source hour.
+    start_ts = (
+        requested_start.timestamp() if cutoff is not None else
+        max(requested_start.timestamp(), published[0] if published else valid_source[0])
     )
     start = _hour(start_ts)
     if start >= end:
@@ -222,6 +265,10 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
         ]
         baseline[zid] = float(max(older, key=lambda r: r["start"])["sum"]) \
             if older else 0.0
+    if cutoff is not None and start == cutoff:
+        # The first post-cutoff statistic deliberately begins at zero, not
+        # an old synthetic cumulative baseline.
+        baseline = {zid: 0.0 for zid in zone_ids}
     running = baseline.copy()
     pending: dict[str, list[StatisticData]] = {zid: [] for zid in zone_ids}
     changed_hours: set[float] = set()
@@ -318,6 +365,225 @@ async def allocate_recent(hass, main, *, days: int = 3, dry_run: bool = False) -
         "note": "Uses supported Recorder external-statistics upsert; "
                 "existing v2 IDs stay stable and Vaillant input is unchanged.",
     }
+
+
+async def configure_heating_allocation_cutoff(
+    hass, main, *, date: str, dry_run: bool = True,
+    confirm_delete_pre_cutoff: bool = False,
+) -> dict:
+    """Preview or execute one-household Tado-only pre-cutoff data cleanup.
+
+    Retained hourly rows are prepared and validated *before* deletion.
+    A persistent per-entry cutoff then blocks accidental old-hour recreation.
+    Use only Home Assistant's supported Recorder ranged clear/import APIs.
+    Nothing accesses or changes the myPyllant source statistic.
+    """
+    if not getattr(main, "is_x", False):
+        raise HomeAssistantError("Heating allocation cutoff requires tado X")
+    try:
+        day = calendar_date.fromisoformat(date)
+    except (TypeError, ValueError) as err:
+        raise HomeAssistantError("Cutoff date must be YYYY-MM-DD") from err
+    zone = ZoneInfo(hass.config.time_zone or "UTC")
+    cutoff = datetime(
+        day.year, day.month, day.day, tzinfo=zone
+    ).astimezone(timezone.utc)
+    end = datetime.now(timezone.utc).replace(
+        minute=0, second=0, microsecond=0
+    )
+    if cutoff >= end:
+        raise HomeAssistantError("Cutoff must precede the current completed hour")
+    if end - cutoff > timedelta(days=365):
+        raise HomeAssistantError("Cutoff cleanup is limited to the last 365 days")
+
+    configured = _allocation_cutoff(main)
+    if configured is not None and configured != cutoff:
+        raise HomeAssistantError(
+            "A different allocation cutoff is already configured. "
+            "Changing it would require a separate migration."
+        )
+    source_id = _gas_statistic(hass)
+    if source_id is None:
+        return {"status": "no_unique_vaillant_gas_heating_statistic",
+                "no_statistics_modified": True}
+    room_sensors = _room_sensor_ids(hass, main)
+    if len(room_sensors) != len(main.zones):
+        return {"status": "room_heating_sensors_not_ready",
+                "no_statistics_modified": True}
+    capacities = _capacities(main)
+    zone_ids = (*room_sensors, "unallocated")
+    stat_ids = {_stat_id(main, zid) for zid in zone_ids}
+
+    snapshots = await _fetch(
+        hass, cutoff - timedelta(hours=1), end,
+        {source_id, *room_sensors.values()}, "hour"
+    )
+    source = _rows_by_start(snapshots.get(source_id))
+    demands = {
+        zid: _rows_by_start(snapshots.get(entity_id))
+        for zid, entity_id in room_sensors.items()
+    }
+    running = {zid: 0.0 for zid in zone_ids}
+    rows: dict[str, list[StatisticData]] = {zid: [] for zid in zone_ids}
+    unknown_hours = 0
+    invalid_hours = []
+    for offset in range(int((end - cutoff).total_seconds() // 3600)):
+        hour = cutoff + timedelta(hours=offset)
+        stamp = hour.timestamp()
+        current, previous = source.get(stamp), source.get(stamp - 3600)
+        if (
+            current is None or previous is None
+            or current.get("sum") is None or previous.get("sum") is None
+        ):
+            invalid_hours.append(hour.isoformat())
+            continue
+        delta_wh = float(current["sum"]) - float(previous["sum"])
+        if not 0 <= delta_wh <= 200000:
+            invalid_hours.append(hour.isoformat())
+            continue
+        gas_kwh = delta_wh * KWH_PER_WH
+        means = {}
+        for zid, samples in demands.items():
+            val = samples.get(stamp, {}).get("mean")
+            try:
+                means[zid] = float(val) if val is not None else None
+            except (TypeError, ValueError):
+                means[zid] = None
+        allocations, unallocated = _calculate_hourly_shares(
+            gas_kwh, means, capacities
+        )
+        if unallocated > 0:
+            unknown_hours += 1
+        values = {**allocations, "unallocated": unallocated}
+        for zid in zone_ids:
+            value = values[zid]
+            running[zid] += value
+            rows[zid].append(StatisticData(
+                start=hour, state=value, sum=running[zid],
+            ))
+
+    if invalid_hours:
+        return {
+            "status": "blocked_missing_or_invalid_vaillant_hours",
+            "read_only": True,
+            "no_statistics_modified": True,
+            "cutoff_local_date": date,
+            "first_invalid_hours_utc": invalid_hours[:10],
+            "invalid_hour_count": len(invalid_hours),
+            "message": "No records were deleted. A continuous Vaillant source "
+                       "is required for safe rebasing of cumulative statistics.",
+        }
+
+    retained_hours = len(next(iter(rows.values())))
+    if not retained_hours:
+        raise HomeAssistantError("No completed source hours after the cutoff")
+
+    # Count only the targeted tado outputs. Never read data from other
+    # households for cleanup or supply a wildcard statistic ID to Recorder.
+    older = await _fetch(
+        hass, cutoff - timedelta(days=365), cutoff, stat_ids, "hour"
+    )
+    old_rows = sum(
+        len([r for r in older.get(stat_id, [])
+             if float(r["start"]) < cutoff.timestamp()])
+        for stat_id in stat_ids
+    )
+    result = {
+        "status": "cutoff_preview" if dry_run else "cutoff_applied",
+        "cutoff_local_date": date,
+        "cutoff_utc": cutoff.isoformat(),
+        "timezone": str(zone),
+        "read_only": dry_run,
+        "no_vaillant_or_tado_demand_statistics_modified": True,
+        "old_tado_hourly_rows_to_remove": old_rows,
+        "target_statistic_ids": sorted(stat_ids),
+        "target_statistic_count": len(stat_ids),
+        "retained_hours_per_statistic": retained_hours,
+        "retained_statistic_rows_to_rebuild": sum(map(len, rows.values())),
+        "retained_heating_gas_kwh": round(sum(running.values()), 3),
+        "retained_allocated_kwh": round(
+            sum(v for k, v in running.items() if k != "unallocated"), 3
+        ),
+        "retained_unallocated_kwh": round(running["unallocated"], 3),
+        "retained_unallocated_hours": unknown_hours,
+        "note": "Deletes only pre-cutoff hourly/daily v2 tado room statistics; "
+                "Vaillant gas and tado room-demand inputs are untouched.",
+    }
+    if dry_run:
+        return {**result, "no_statistics_modified": True}
+    if not confirm_delete_pre_cutoff:
+        raise HomeAssistantError(
+            "Cleanup requires confirm_delete_pre_cutoff=true and "
+            "dry_run=false after a Home Assistant backup."
+        )
+
+    # Mark the specific household as pending before deleting. An interrupted
+    # migration cannot silently resume the pre-cutoff hourly publisher.
+    entry = main.config_entry
+    pending_options = {
+        **entry.options,
+        CUTOFF_OPTION: cutoff.isoformat(),
+        CUTOFF_COMPLETE_OPTION: False,
+    }
+    hass.config_entries.async_update_entry(entry, options=pending_options)
+    instance = get_instance(hass)
+    completed = asyncio.Event()
+    def done() -> None:
+        hass.loop.call_soon_threadsafe(completed.set)
+    instance.async_clear_statistics(
+        sorted(stat_ids),
+        start_time=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        end_time=cutoff,
+        on_done=done,
+    )
+    await asyncio.wait_for(completed.wait(), timeout=120)
+
+    names = {
+        str(z["id"]): str(z.get("name", z["id"])) for z in main.zones
+    }
+    names["unallocated"] = "Unallocated / no room demand"
+    for zid in zone_ids:
+        async_add_external_statistics(
+            hass, _meta(main, zid, names[zid]), rows[zid]
+        )
+    await asyncio.wait_for(instance.async_block_till_done(), timeout=120)
+
+    # The imported series must have a zero-based cumulative starting point.
+    # Only mark completed when all exact final hourly sums are readable.
+    saved = await _fetch(hass, cutoff, end, stat_ids, "hour")
+    for zid in zone_ids:
+        actual = _rows_by_start(saved.get(_stat_id(main, zid)))
+        first = rows[zid][0]
+        last = rows[zid][-1]
+        for expected in (first, last):
+            found = actual.get(expected["start"].timestamp())
+            if found is None or found.get("sum") is None or abs(
+                float(found["sum"]) - float(expected["sum"])
+            ) > 0.00001:
+                return {
+                    **result,
+                    "status": "cutoff_rebuild_unverified_retry_required",
+                    "read_only": False,
+                    "migration_pending": True,
+                    "no_statistics_modified": False,
+                    "message": "The pre-cutoff tado rows were cleared, but "
+                               "the retained rebuild could not be verified. "
+                               "Run the same action again; automatic hourly "
+                               "allocation remains suspended.",
+                }
+
+    hass.config_entries.async_update_entry(
+        entry, options={
+            **entry.options,
+            CUTOFF_OPTION: cutoff.isoformat(),
+            CUTOFF_COMPLETE_OPTION: True,
+        }
+    )
+    main.x_allocation_full_rebuild_pending = False
+    return {**result, "no_statistics_modified": False,
+            "migration_pending": False}
+
+
 
 
 async def _live_reconciled_history(
@@ -669,6 +935,16 @@ async def reconciliation_report(
         next_day.year, next_day.month, next_day.day, tzinfo=tz
     )
     start, end = start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+    cutoff = _allocation_cutoff(main)
+    if cutoff is not None and start < cutoff:
+        return {
+            "status": "before_allocation_cutoff",
+            "date": target_day.isoformat(),
+            "cutoff_utc": cutoff.isoformat(),
+            "read_only": True,
+            "note": "Older synthetic room distributions are excluded. "
+                    "Original Vaillant gas history is preserved.",
+        }
     report = await _live_reconciled_history(
         hass, main, start, end, "day", "hour", tz
     )
@@ -722,6 +998,27 @@ async def allocation_history(
         group = ("month" if period in ("year", "3years") else
                  "day" if period in ("week", "month") else "hour")
 
+    cutoff = _allocation_cutoff(main)
+    if cutoff is not None:
+        start = max(start, cutoff)
+        if start >= end:
+            return {
+                "period": period,
+                "start_time": start.isoformat(),
+                "end_time": end.isoformat(),
+                "rooms": [
+                    *(str(z.get("name", z["id"])) for z in main.zones),
+                    "Unallocated",
+                ],
+                "series": [],
+                "data_mode": "no_data_before_cutoff",
+                "cutoff_time": cutoff.isoformat(),
+                "unit": "kWh of estimated heating gas input",
+                "note": "Older room distributions were removed at the "
+                        "configured allocation cutoff; original Vaillant "
+                        "gas consumption remains available.",
+            }
+
     # Recalculate bounded selections from the latest Vaillant source values,
     # rather than relying on append-only historic v2 room allocations.
     live = await _live_reconciled_history(hass, main, start, end, period, group, tz)
@@ -741,7 +1038,8 @@ async def allocation_history(
     for zid, name in zones.items():
         rows = sorted(stats.get(_stat_id(main, zid), []),
                       key=lambda row: row["start"])
-        previous = None
+        # A cutoff migration rebases this complete derived series to zero.
+        previous = 0.0 if cutoff is not None and start == cutoff else None
         for row in rows:
             dt = _hour(row["start"])
             if dt < start:
@@ -802,7 +1100,13 @@ async def diagnose_unallocated(hass, main, *, days: int = 35,
         }
 
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=days)
+    cutoff = _allocation_cutoff(main)
+    start = max(end - timedelta(days=days), cutoff) if cutoff else (
+        end - timedelta(days=days)
+    )
+    if start >= end:
+        return {"status": "no_hours_after_cutoff", "read_only": True,
+                "unallocated_kwh": 0, "days": days}
     # One hour before for the Vaillant cumulative gas delta; one after for a
     # comparison with the following tado room-demand hour when available.
     snapshots = await _fetch(
@@ -831,7 +1135,7 @@ async def diagnose_unallocated(hass, main, *, days: int = 35,
     valid_gas_kwh = 0.0
     unallocated = 0.0
     skipped_gas_hours = 0
-    for idx in range(days * 24):
+    for idx in range(int((end-start).total_seconds() // 3600)):
         hour = start + timedelta(hours=idx)
         t = hour.timestamp()
         previous_t = t - 3600
