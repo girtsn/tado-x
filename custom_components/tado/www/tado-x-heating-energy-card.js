@@ -1,5 +1,5 @@
 const xhTag=name=>name+"-v"+(new URL(import.meta.url).searchParams.get("v")||"dev").replace(/\./g,"-");
-const {xhPresetRange}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
+const {xhPresetRange,xhZone}=await import("./x-date-range-picker.js?v="+encodeURIComponent(new URL(import.meta.url).searchParams.get("v")||"dev"));
 /* tado X + Vaillant hourly gas-energy allocation dashboard card.
  * Entirely local Recorder reads; no new tado/Vaillant network polls.
  */
@@ -39,7 +39,8 @@ class TadoXHeatingEnergyCard extends HTMLElement {
     const request=++this._requestId;
     this._busy=true;this._render();
     try{
-      const args={start_time:this._dateRange.start,end_time:this._dateRange.end};
+      const args={start_time:this._dateRange.start,end_time:this._dateRange.end,
+        time_zone:xhZone(this._hass)};
       const data=await this._call("x_heating_allocation_history",args);
       if(request===this._requestId){this._data=data;this._message="";}
     }catch(e){if(request===this._requestId)

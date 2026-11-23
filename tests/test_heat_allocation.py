@@ -779,5 +779,35 @@ class AllocationTests(unittest.TestCase):
         self.assertTrue(result["no_statistics_modified"])
 
 
+    def test_history_groups_by_explicit_profile_timezone(self):
+        """Front-end may request a local viewing day without changing boiler cutoff."""
+        self.hass.config=SimpleNamespace(time_zone="Europe/Brussels")
+        seen=[]
+        async def live(hass, main, start, end, period, group, tz):
+            seen.append((start, end, tz.key, group))
+            return {"period": period, "series": [], "data_mode":"live_reconciled"}
+        with patch.object(allocation, "_live_reconciled_history", live):
+            result=asyncio.run(allocation.allocation_history(
+                self.hass,self.main,
+                start_time="2026-11-21T22:00:00+00:00",
+                end_time="2026-11-22T22:00:00+00:00",
+                time_zone="Europe/Riga",
+            ))
+        self.assertEqual(result["data_mode"],"live_reconciled")
+        self.assertEqual(seen[0][2],"Europe/Riga")
+        self.assertEqual(seen[0][3],"hour")
+        self.assertEqual(seen[0][0].isoformat(),"2026-11-21T22:00:00+00:00")
+
+    def test_history_invalid_display_timezone_is_rejected(self):
+        self.hass.config=SimpleNamespace(time_zone="Europe/Brussels")
+        with self.assertRaisesRegex(Exception,"Invalid history display time_zone"):
+            asyncio.run(allocation.allocation_history(
+                self.hass,self.main,
+                start_time="2026-11-21T23:00:00+00:00",
+                end_time="2026-11-22T23:00:00+00:00",
+                time_zone="Wrong/Zone",
+            ))
+
+
 if __name__=="__main__":
     unittest.main()

@@ -79,4 +79,42 @@ const yorkToday=presetRange("today",nearMidnight,york);
 assert.equal(yorkToday.start,"2026-11-22T05:00:00.000Z");
 assert.equal(yorkToday.end,"2026-11-23T05:00:00.000Z");
 
+// Profile preference must win over the device vs server timezone choice.
+const originalDeviceTZ=process.env.TZ;
+try{
+  process.env.TZ="Europe/Riga"; // travelling: winter UTC+2; HA Brussels UTC+1
+  const userServer={config:{time_zone:"Europe/Brussels"},
+    locale:{time_zone:"server",first_weekday:"monday",language:"en-GB"}};
+  const userLocal={config:{time_zone:"Europe/Brussels"},
+    locale:{time_zone:"local",first_weekday:"monday",language:"en-GB"}};
+  const serverDay=presetRange("yesterday",nearMidnight,userServer);
+  const localDay=presetRange("yesterday",nearMidnight,userLocal);
+  assert.equal(serverDay.start,"2026-11-21T23:00:00.000Z");
+  assert.equal(serverDay.end,"2026-11-22T23:00:00.000Z");
+  assert.equal(localDay.start,"2026-11-21T22:00:00.000Z");
+  assert.equal(localDay.end,"2026-11-22T22:00:00.000Z");
+  const travelling=new Picker();
+  travelling.hass=userServer;
+  travelling._dayClick(new Date(Date.UTC(2026,10,22)));
+  travelling._apply(travelling._draftStart,travelling._draftEnd,"custom");
+  assert.equal(travelling.range.start,serverDay.start);
+  travelling.hass=userLocal;
+  assert.equal(travelling.range.start,localDay.start);
+  assert.equal(travelling.range.end,localDay.end);
+  travelling.hass=userServer;
+  assert.equal(travelling.range.start,serverDay.start);
+  assert.equal(travelling.range.end,serverDay.end);
+  const localSpring=presetRange("today",new Date("2026-03-29T12:00:00.000Z"),userLocal);
+  assert.equal(localSpring.start,"2026-03-28T22:00:00.000Z");
+  assert.equal(localSpring.end,"2026-03-29T21:00:00.000Z");
+  const localAutumn=presetRange("today",new Date("2026-10-25T12:00:00.000Z"),userLocal);
+  assert.equal(localAutumn.start,"2026-10-24T21:00:00.000Z");
+  assert.equal(localAutumn.end,"2026-10-25T22:00:00.000Z");
+  assert.equal(new Date(localAutumn.end)-new Date(localAutumn.start),25*3600000);
+  assert.equal(new Date(localSpring.end)-new Date(localSpring.start),23*3600000);
+}finally{
+  if(originalDeviceTZ===undefined)delete process.env.TZ;
+  else process.env.TZ=originalDeviceTZ;
+}
+
 console.log("Home Assistant first-weekday regression tests passed");

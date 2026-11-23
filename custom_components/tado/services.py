@@ -288,7 +288,8 @@ def setup_services(
             return await allocation_history(
                 hass, main, period=call.data.get("period", "month"),
                 start_time=call.data.get("start_time"),
-                end_time=call.data.get("end_time")
+                end_time=call.data.get("end_time"),
+                time_zone=call.data.get("time_zone"),
             )
 
         hass.services.async_register(
@@ -306,6 +307,7 @@ def setup_services(
                     vol.In(["day", "week", "month", "year", "3years"]),
                 vol.Optional("start_time"): str,
                 vol.Optional("end_time"): str,
+                vol.Optional("time_zone"): str,
             }),
             supports_response=SupportsResponse.ONLY,
         )
